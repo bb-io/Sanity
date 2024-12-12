@@ -1,13 +1,15 @@
 ﻿using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Metadata;
 
-namespace Apps.App;
+namespace Apps.Sanity;
 
 public class Application : IApplication, ICategoryProvider
 {
     public IEnumerable<ApplicationCategory> Categories
     {
-        get => [];
+        get => [
+            ApplicationCategory.Cms
+        ];
         set { }
     }
 
