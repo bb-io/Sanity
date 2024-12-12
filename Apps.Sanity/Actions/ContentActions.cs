@@ -1,7 +1,7 @@
 using Apps.Sanity.Api;
 using Apps.Sanity.Invocables;
 using Apps.Sanity.Models.Dtos;
-using Apps.Sanity.Models.Identifiers;
+using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses.Content;
 using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Actions;
@@ -15,9 +15,9 @@ public class ContentActions(InvocationContext invocationContext) : AppInvocable(
 {
     [Action("Search content",
         Description = "Search content within specific dataset. By default dataset will be as production")]
-    public async Task<SearchContentResponse> SearchContentAsync([ActionParameter] DatasetIdentifier identifier)
+    public async Task<SearchContentResponse> SearchContentAsync([ActionParameter] SearchContentRequest identifier)
     {
-        var endpoint = $"/data/query/{identifier}?query=*[]";
+        var endpoint = $"/data/query/{identifier}{identifier.BuildGroqQuery()} | order(_createdAt desc)";
         var request = new ApiRequest(endpoint, Method.Get, Creds);
         var content = await Client.ExecuteWithErrorHandling<BaseSearchDto<ContentResponse>>(request);
         return new(content.Result);

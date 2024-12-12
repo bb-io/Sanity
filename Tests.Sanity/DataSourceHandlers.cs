@@ -7,7 +7,7 @@ namespace Tests.Sanity;
 public class DataSourceHandlers : TestBase
 {
     [TestMethod]
-    public async Task ValidateDatasetDataHandler()
+    public async Task DatasetDataHandler_WithoutSearchString_ShouldNotThrowError()
     {
         var datasetDataHandler = new DatasetDataHandler(InvocationContext);
         var result = await datasetDataHandler.GetDataAsync(new(), default)
