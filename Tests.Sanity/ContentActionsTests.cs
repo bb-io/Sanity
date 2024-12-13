@@ -81,6 +81,21 @@ public class ContentActionsTests : TestBase
     }
 
     [TestMethod]
+    public async Task UpdateContentFromHtml_ExistingContent_ShouldNotThrowError()
+    {
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
+        await datasetDataHandler.UpdateContentFromHtmlAsync(new()
+        {
+            TargetLanguage = "fr", 
+            File = new()
+            {
+                Name = "273a4464-4363-4aef-92b8-fc828ef60396.html",
+                ContentType = "text/html"
+            }
+        });
+    }
+
+    [TestMethod]
     public async Task CreateContent_EmptyContent_ShouldNotThrowError()
     {
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);

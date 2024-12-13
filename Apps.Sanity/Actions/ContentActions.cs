@@ -12,6 +12,7 @@ using Blackbird.Applications.Sdk.Common.Actions;
 using Blackbird.Applications.Sdk.Common.Exceptions;
 using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
+using Blackbird.Applications.Sdk.Utils.Extensions.Files;
 using Blackbird.Applications.Sdk.Utils.Extensions.Http;
 using Newtonsoft.Json.Linq;
 using RestSharp;
@@ -77,6 +78,43 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             File = fileReference
         };
+    }
+    
+    [Action("Update content from HTML", Description = "Update localizable content fields from HTML file")]
+    public async Task UpdateContentFromHtmlAsync([ActionParameter] UpdateContentFromHtmlRequest request)
+    {
+        var file = await fileManagementClient.DownloadAsync(request.File);
+        var bytes = await file.GetByteData();
+        var html = Encoding.Default.GetString(bytes);
+        var contentId = HtmlHelper.ExtractContentId(html);
+        
+        var jObjects = await SearchContentAsJObjectAsync(new()
+        {
+            DatasetId = request.DatasetId,
+            GroqQuery = $"_id == \"{contentId}\""
+        });
+
+        if (jObjects.Count == 0)
+        {
+            throw new PluginMisconfigurationException(
+                "No content found for the provided ID. Please verify that the ID is correct and try again.");
+        }
+
+        var content = jObjects.First();
+        var patches = HtmlToJsonConvertor.ToJsonPatches(html, content, request.TargetLanguage);
+        
+        var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
+            .WithJsonBody(new
+            {
+                mutations = patches
+            });
+
+        var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
+        if (string.IsNullOrEmpty(transaction.TransactionId))
+        {
+            throw new PluginApplicationException(
+                "An unexpected error occurred while updating the content. Please contact support for further assistance.");
+        }
     }
 
     [Action("Create content", Description = "Create a content object based on his type and other parameters")]
