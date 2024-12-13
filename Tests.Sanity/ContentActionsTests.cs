@@ -1,6 +1,7 @@
 ﻿using Apps.Sanity.Actions;
 using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses.Content;
+using Blackbird.Applications.Sdk.Common.Exceptions;
 using FluentAssertions;
 using Tests.Sanity.Base;
 
@@ -24,10 +25,8 @@ public class ContentActionsTests : TestBase
             Types = new[] { "event" }
         };
 
-        await VerifySearchContentAsync(request, result =>
-        {
-            return Task.Run(() => result.Items.Should().AllSatisfy(x => x.Type.Should().Be("event")));
-        });
+        await VerifySearchContentAsync(request,
+            result => { return Task.Run(() => result.Items.Should().AllSatisfy(x => x.Type.Should().Be("event"))); });
     }
 
     [TestMethod]
@@ -39,12 +38,14 @@ public class ContentActionsTests : TestBase
             CreatedAfter = createdAfter
         };
 
-        await VerifySearchContentAsync(request, result =>
-        {
-            return Task.Run(() => result.Items.Should().AllSatisfy(x => x.CreatedAt.Should().BeAfter(createdAfter)));
-        });
+        await VerifySearchContentAsync(request,
+            result =>
+            {
+                return Task.Run(() =>
+                    result.Items.Should().AllSatisfy(x => x.CreatedAt.Should().BeAfter(createdAfter)));
+            });
     }
-    
+
     [TestMethod]
     public async Task SearchContent_WithGroqAtInputParameters_ShouldNotThrowAnError()
     {
@@ -55,8 +56,58 @@ public class ContentActionsTests : TestBase
 
         await VerifySearchContentAsync(request, result => Task.Delay(1));
     }
-    
-    private async Task VerifySearchContentAsync(SearchContentRequest request, Func<SearchContentResponse, Task>? additionalAssertions = null)
+
+    [TestMethod]
+    public async Task GetContent_ExistingContent_ShouldNotThrowError()
+    {
+        var contentId = "1jzxHAeumuCFu7uTFF2ZAQ";
+        var datasetDataHandler = new ContentActions(InvocationContext);
+        var content = await datasetDataHandler.GetContentAsync(new() { ContentId = contentId });
+
+        content.Id.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.Id}: {content.Type}");
+    }
+
+    [TestMethod]
+    public async Task CreateContent_EmptyContent_ShouldNotThrowError()
+    {
+        var datasetDataHandler = new ContentActions(InvocationContext);
+        var content = await datasetDataHandler.CreateContentAsync(new() { Type = "event" });
+
+        content.Id.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.Id}: {content.Type}");
+        
+        await DeleteContentAsync(content.Id);
+    }
+
+    [TestMethod]
+    public async Task CreateContent_ContentWithName_ShouldNotThrowError()
+    {
+        var datasetDataHandler = new ContentActions(InvocationContext);
+        var content = await datasetDataHandler.CreateContentAsync(new()
+        {
+            Type = "event",
+            Properties = new[] { "Name" },
+            PropertyValues = new[] { $"Test event {Guid.NewGuid()}" }
+        });
+
+        content.Id.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.Id}: {content.Type}");
+
+        await DeleteContentAsync(content.Id);
+    }
+
+    [TestMethod]
+    public async Task DeleteContent_NotExistingContent_ShouldThrowError()
+    {
+        var contentId = "not valid";
+        var datasetDataHandler = new ContentActions(InvocationContext);
+        await Assert.ThrowsExceptionAsync<PluginMisconfigurationException>(async () =>
+            await datasetDataHandler.DeleteContentAsync(new() { ContentId = contentId }));
+    }
+
+    private async Task VerifySearchContentAsync(SearchContentRequest request,
+        Func<SearchContentResponse, Task>? additionalAssertions = null)
     {
         var datasetDataHandler = new ContentActions(InvocationContext);
         var result = await datasetDataHandler.SearchContentAsync(request);
@@ -75,5 +126,12 @@ public class ContentActionsTests : TestBase
         {
             Console.WriteLine($"{item.Id}: {item.Type}");
         }
+    }
+    
+    private async Task DeleteContentAsync(string contentID)
+    {
+        var datasetDataHandler = new ContentActions(InvocationContext);
+        await datasetDataHandler.DeleteContentAsync(new() { ContentId = contentID });
+        Console.WriteLine("Content was successfully deleted");
     }
 }
