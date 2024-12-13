@@ -13,7 +13,7 @@ public class ContentDataHandler(InvocationContext invocationContext, [ActionPara
 {
     public async Task<IEnumerable<DataSourceItem>> GetDataAsync(DataSourceContext context, CancellationToken cancellationToken)
     {
-        var contentActions = new ContentActions(InvocationContext);
+        var contentActions = new ContentActions(InvocationContext, null!);
         var content = await contentActions.SearchContentAsJObjectAsync(new()
         {
             DatasetId = datasetIdentifier.DatasetId

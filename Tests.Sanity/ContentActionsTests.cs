@@ -61,7 +61,7 @@ public class ContentActionsTests : TestBase
     public async Task GetContent_ExistingContent_ShouldNotThrowError()
     {
         var contentId = "1jzxHAeumuCFu7uTFF2ZAQ";
-        var datasetDataHandler = new ContentActions(InvocationContext);
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content = await datasetDataHandler.GetContentAsync(new() { ContentId = contentId });
 
         content.Id.Should().NotBeNullOrEmpty();
@@ -69,21 +69,33 @@ public class ContentActionsTests : TestBase
     }
 
     [TestMethod]
+    public async Task GetContentAsHtml_ExistingContent_ShouldNotThrowError()
+    {
+        var contentId = "273a4464-4363-4aef-92b8-fc828ef60396";
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
+        var content =
+            await datasetDataHandler.GetContentAsHtmlAsync(new() { ContentId = contentId, SourceLanguage = "en" });
+
+        content.File.Name.Should().NotBeNullOrEmpty();
+        Console.WriteLine(content.File.Name);
+    }
+
+    [TestMethod]
     public async Task CreateContent_EmptyContent_ShouldNotThrowError()
     {
-        var datasetDataHandler = new ContentActions(InvocationContext);
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content = await datasetDataHandler.CreateContentAsync(new() { Type = "event" });
 
         content.Id.Should().NotBeNullOrEmpty();
         Console.WriteLine($"{content.Id}: {content.Type}");
-        
+
         await DeleteContentAsync(content.Id);
     }
 
     [TestMethod]
     public async Task CreateContent_ContentWithName_ShouldNotThrowError()
     {
-        var datasetDataHandler = new ContentActions(InvocationContext);
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content = await datasetDataHandler.CreateContentAsync(new()
         {
             Type = "event",
@@ -101,7 +113,7 @@ public class ContentActionsTests : TestBase
     public async Task DeleteContent_NotExistingContent_ShouldThrowError()
     {
         var contentId = "not valid";
-        var datasetDataHandler = new ContentActions(InvocationContext);
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         await Assert.ThrowsExceptionAsync<PluginMisconfigurationException>(async () =>
             await datasetDataHandler.DeleteContentAsync(new() { ContentId = contentId }));
     }
@@ -109,7 +121,7 @@ public class ContentActionsTests : TestBase
     private async Task VerifySearchContentAsync(SearchContentRequest request,
         Func<SearchContentResponse, Task>? additionalAssertions = null)
     {
-        var datasetDataHandler = new ContentActions(InvocationContext);
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var result = await datasetDataHandler.SearchContentAsync(request);
 
         result.Items.Should().NotBeNull("Action should not return null collection");
@@ -127,10 +139,10 @@ public class ContentActionsTests : TestBase
             Console.WriteLine($"{item.Id}: {item.Type}");
         }
     }
-    
+
     private async Task DeleteContentAsync(string contentID)
     {
-        var datasetDataHandler = new ContentActions(InvocationContext);
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         await datasetDataHandler.DeleteContentAsync(new() { ContentId = contentID });
         Console.WriteLine("Content was successfully deleted");
     }

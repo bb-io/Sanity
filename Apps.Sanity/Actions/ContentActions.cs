@@ -1,3 +1,4 @@
+using System.Text;
 using Apps.Sanity.Api;
 using Apps.Sanity.Invocables;
 using Apps.Sanity.Models.Dtos;
@@ -5,10 +6,12 @@ using Apps.Sanity.Models.Identifiers;
 using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses;
 using Apps.Sanity.Models.Responses.Content;
+using Apps.Sanity.Utils;
 using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Actions;
 using Blackbird.Applications.Sdk.Common.Exceptions;
 using Blackbird.Applications.Sdk.Common.Invocation;
+using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Http;
 using Newtonsoft.Json.Linq;
 using RestSharp;
@@ -16,7 +19,7 @@ using RestSharp;
 namespace Apps.Sanity.Actions;
 
 [ActionList]
-public class ContentActions(InvocationContext invocationContext) : AppInvocable(invocationContext)
+public class ContentActions(InvocationContext invocationContext, IFileManagementClient fileManagementClient) : AppInvocable(invocationContext)
 {
     [Action("Search content",
         Description =
@@ -46,6 +49,34 @@ public class ContentActions(InvocationContext invocationContext) : AppInvocable(
         }
 
         return content.Items.First();
+    }
+
+    [Action("Get content as HTML", Description = "Get localizable content fields as HTML file")]
+    public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
+    {
+        var groqQuery = $"_id == \"{getContentAsHtmlRequest.ContentId}\"";
+        var jObjects = await SearchContentAsJObjectAsync(new()
+        {
+            DatasetId = getContentAsHtmlRequest.DatasetId,
+            GroqQuery = groqQuery
+        });
+
+        if (jObjects.Count == 0)
+        {
+            throw new PluginMisconfigurationException(
+                "No content found for the provided ID. Please verify that the ID is correct and try again.");
+        }
+
+        var content = jObjects.First();
+        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage);
+        var memoryStream =  new MemoryStream(Encoding.UTF8.GetBytes(html));
+        memoryStream.Position = 0;
+
+        var fileReference = await fileManagementClient.UploadAsync(memoryStream, "text/html", $"{getContentAsHtmlRequest.ContentId}.html");
+        return new()
+        {
+            File = fileReference
+        };
     }
 
     [Action("Create content", Description = "Create a content object based on his type and other parameters")]
