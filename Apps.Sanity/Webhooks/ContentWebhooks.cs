@@ -14,12 +14,12 @@ namespace Apps.Sanity.Webhooks;
 public class ContentWebhooks(InvocationContext invocationContext) : AppInvocable(invocationContext)
 {
     [Webhook("On content updated", typeof(ContentUpdatedHandler), 
-        Description = "This webhook is triggered when a content is updated.")]
+        Description = "This event is triggered when a content is updated.")]
     public Task<WebhookResponse<ContentResponse>> OnContentUpdated(WebhookRequest request,
         [WebhookParameter] WebhookFilterRequest filterRequest) => HandleWebhookRequest(request, filterRequest);
 
     [Webhook("On content created", typeof(ContentCreatedHandler),
-        Description = "This webhook is triggered when a new content is created.")]
+        Description = "This event is triggered when a new content is created.")]
     public Task<WebhookResponse<ContentResponse>> OnContentCreated(WebhookRequest request,
         [WebhookParameter] WebhookFilterRequest filterRequest) => HandleWebhookRequest(request, filterRequest);
 
@@ -42,7 +42,7 @@ public class ContentWebhooks(InvocationContext invocationContext) : AppInvocable
         }
 
         if (!string.IsNullOrEmpty(filterRequest.TranslationLanguage) &&
-            filterRequest.TriggerIfAllLanguageFieldsAreEmpty.HasValue)
+            filterRequest.TriggerIfAllLanguageFieldsAreEmpty is true)
         {
             if (JsonHelper.TranslationForSpecificLanguageExist(body, filterRequest.TranslationLanguage))
             {
