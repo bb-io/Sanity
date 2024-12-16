@@ -22,7 +22,6 @@ public static class HtmlToJsonConvertor
             return patches;
         }
 
-        // Added dictionary to group patches by their parent path key
         var groupedPatches = new Dictionary<string, JObject>();
 
         foreach (var node in nodesWithPath)
@@ -47,7 +46,6 @@ public static class HtmlToJsonConvertor
             var (jsonPropertyPath, foundKeyIndex) = BuildJsonPropertyPath(currentJObject, parsedPathSegments,
                 targetLanguage, out var shouldInsert);
 
-            // Get or create a grouped patch for this parent
             if (!groupedPatches.TryGetValue(parentPathKey, out var existingPatch))
             {
                 existingPatch = new JObject
@@ -79,7 +77,6 @@ public static class HtmlToJsonConvertor
                 var insertContent = (JObject)patchContent["insert"];
                 var itemsArray = (JArray)insertContent["items"];
 
-                // Try to find an existing item with the same _key
                 var existingItem = itemsArray
                     .OfType<JObject>()
                     .FirstOrDefault(i => i["_key"]?.ToString() == targetLanguage);
@@ -90,17 +87,15 @@ public static class HtmlToJsonConvertor
                     {
                         ["_key"] = targetLanguage,
                         ["_type"] = itemType,
-                        ["value"] = new JObject() // Start with an empty object for complex types
+                        ["value"] = new JObject() 
                     };
                     itemsArray.Add(existingItem);
                 }
 
                 var valueObj = existingItem["value"];
 
-                // If value is currently a string and we need a complex object, convert it
                 if (valueObj is JValue)
                 {
-                    // Replace string with a new object if needed
                     valueObj = new JObject();
                     existingItem["value"] = valueObj;
                 }
@@ -108,30 +103,15 @@ public static class HtmlToJsonConvertor
                 var lastSegment = jsonPropertyPath.Split('.').Last();
                 if (jsonPropertyPath.Contains(".value."))
                 {
-                    // We have a nested property inside value
                     var parts = jsonPropertyPath.Split(new[] { ".value." }, StringSplitOptions.None);
                     SetNestedProperty((JObject)valueObj, parts[1], newText);
                 }
                 else if (lastSegment == "value")
                 {
-                    // Directly assign the value as a string if the path ends in .value
                     existingItem["value"] = newText;
                 }
                 else
                 {
-                    // If there's no ".value." and it doesn't end with "value",
-                    // we treat this as a top-level property inside "value".
-                    // For example, if jsonPropertyPath was "localized[1].value",
-                    // we already handled that above. But if it's something else,
-                    // we might just set a property inside valueObj.
-
-                    // Extract the property name (excluding array indexing):
-                    // For something like "localized[1].value", lastSegment = "value"
-                    // but we handled that case above. If we get here, it's a different scenario.
-                    // Just in case we encounter a scenario like "artist[1].value.name"
-                    // without the ".value." substring (unlikely if code is consistent),
-                    // we can handle similarly by setting a nested property.
-
                     SetNestedProperty((JObject)valueObj, lastSegment, newText);
                 }
             }
@@ -148,7 +128,6 @@ public static class HtmlToJsonConvertor
             }
         }
 
-        // Convert grouped patches to list
         foreach (var kvp in groupedPatches)
         {
             patches.Add(kvp.Value);
