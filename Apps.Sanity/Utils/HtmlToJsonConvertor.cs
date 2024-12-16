@@ -13,132 +13,156 @@ public static class HtmlToJsonConvertor
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
-        // Find all elements with data-json-path attribute
+        var htmlNode = doc.DocumentNode.SelectSingleNode("//html");
+        var sourceLanguage = htmlNode?.GetAttributeValue("lang", "unknown")!;
+
         var nodesWithPath = doc.DocumentNode.SelectNodes("//*[@data-json-path]");
         if (nodesWithPath == null)
         {
             return patches;
         }
 
+        // Added dictionary to group patches by their parent path key
+        var groupedPatches = new Dictionary<string, JObject>();
+
         foreach (var node in nodesWithPath)
         {
             var dataJsonPath = node.GetAttributeValue("data-json-path", null);
             if (dataJsonPath == null) continue;
 
-            // Extract text content
-            string newText = node.InnerText.Trim();
+            var newText = node.InnerText.Trim();
             if (string.IsNullOrEmpty(newText)) continue;
 
-            // We only want to produce patches for the target language.
-            // Check if dataJsonPath includes something like [en] or [fr].
-            // data-json-path might look like: "localized[en]", "artist[en].value.name"
-            // We'll parse it and see if we have a segment with [lang].
+            dataJsonPath = dataJsonPath.Replace($"[{sourceLanguage}]", $"[{targetLanguage}]");
             var parsedPathSegments = dataJsonPath.Split('.');
 
-            // We must identify the segment that contains the language:
-            // e.g. "localized[en]" segment means the array name is "localized" and the lang is "en".
-            // If no segment matches targetLanguage as a [lang], skip.
-            if (!ContainsTargetLanguage(parsedPathSegments, targetLanguage))
+            var parentDiv = node.Ancestors("div").FirstOrDefault(d => d.Attributes["data-json-path"] != null);
+            var parentPathKey = parentDiv?.GetAttributeValue("data-json-path", "") ?? dataJsonPath;
+
+            if (!ContainsLanguage(parsedPathSegments) || node.Name == "div")
             {
                 continue;
             }
 
-            // Now we must navigate currentJObject according to this path.
-            // The path is in a form: segmentOne[en].value.description or localized[en]
-            // Steps:
-            // 1. For each segment, check if it contains [lang]. If it does, resolve array index from _key.
-            // 2. Otherwise just navigate properties.
-
-            bool shouldInsert = false;
             var (jsonPropertyPath, foundKeyIndex) = BuildJsonPropertyPath(currentJObject, parsedPathSegments,
-                targetLanguage, out shouldInsert);
+                targetLanguage, out var shouldInsert);
 
-            // jsonPropertyPath might look like "localized[0].value" or "artist[0].value.description"
-            // We need to set the last property in that path to newText.
-            // The patch structure:
-            // {
-            //   "patch": {
-            //     "id": contentId,
-            //     "set": {
-            //       "localized[0].value": "new text"
-            //     }
-            //   }
-            // }
+            // Get or create a grouped patch for this parent
+            if (!groupedPatches.TryGetValue(parentPathKey, out var existingPatch))
+            {
+                existingPatch = new JObject
+                {
+                    ["patch"] = new JObject
+                    {
+                        ["id"] = contentId
+                    }
+                };
+                groupedPatches[parentPathKey] = existingPatch;
+            }
 
-            var patchObj = new JObject();
-            var patchContent = new JObject();
-            patchObj["patch"] = patchContent;
-            patchContent["id"] = contentId;
+            var patchContent = (JObject)existingPatch["patch"];
 
             if (shouldInsert)
             {
-                // If we must insert:
-                // We have something like "localized" array without the targetLanguage key.
-                // Insert after the last item: "after": "localized[-1]"
-                // Construct the item:
-                // Determine _type. We'll guess from the array:
                 var arrayName = GetArrayName(parsedPathSegments);
                 var itemType = InferInternationalizedType(currentJObject, arrayName);
 
-                var insertContent = new JObject();
-                patchContent["insert"] = insertContent;
-                insertContent["after"] = $"{arrayName}[-1]"; // insert at the end
-
-                // Construct item to insert
-                var newItem = new JObject
+                if (patchContent["insert"] == null)
                 {
-                    ["_key"] = targetLanguage,
-                    ["_type"] = itemType,
-                    ["value"] = newText
-                };
-
-                // If the path points deeper, like "artist[en].value.description",
-                // we need to insert a structured object instead of a simple string.
-                // For simplicity, if we detect ".value." in the path, we assume complex object:
-                if (jsonPropertyPath.Contains(".value."))
-                {
-                    // split at ".value."
-                    var parts = jsonPropertyPath.Split(new[] { ".value." }, StringSplitOptions.None);
-                    // parts[0] = "localized[0]" or something similar
-                    // parts[1] = "description"
-                    // means we must create { "value": { "description": "newText" } }
-                    var valueObj = new JObject();
-                    SetNestedProperty(valueObj, parts[1], newText);
-                    newItem["value"] = valueObj;
+                    patchContent["insert"] = new JObject
+                    {
+                        ["after"] = $"{arrayName}[-1]",
+                        ["items"] = new JArray()
+                    };
                 }
 
-                var itemsArray = new JArray();
-                itemsArray.Add(newItem);
-                insertContent["items"] = itemsArray;
+                var insertContent = (JObject)patchContent["insert"];
+                var itemsArray = (JArray)insertContent["items"];
+
+                // Try to find an existing item with the same _key
+                var existingItem = itemsArray
+                    .OfType<JObject>()
+                    .FirstOrDefault(i => i["_key"]?.ToString() == targetLanguage);
+
+                if (existingItem == null)
+                {
+                    existingItem = new JObject
+                    {
+                        ["_key"] = targetLanguage,
+                        ["_type"] = itemType,
+                        ["value"] = new JObject() // Start with an empty object for complex types
+                    };
+                    itemsArray.Add(existingItem);
+                }
+
+                var valueObj = existingItem["value"];
+
+                // If value is currently a string and we need a complex object, convert it
+                if (valueObj is JValue)
+                {
+                    // Replace string with a new object if needed
+                    valueObj = new JObject();
+                    existingItem["value"] = valueObj;
+                }
+
+                var lastSegment = jsonPropertyPath.Split('.').Last();
+                if (jsonPropertyPath.Contains(".value."))
+                {
+                    // We have a nested property inside value
+                    var parts = jsonPropertyPath.Split(new[] { ".value." }, StringSplitOptions.None);
+                    SetNestedProperty((JObject)valueObj, parts[1], newText);
+                }
+                else if (lastSegment == "value")
+                {
+                    // Directly assign the value as a string if the path ends in .value
+                    existingItem["value"] = newText;
+                }
+                else
+                {
+                    // If there's no ".value." and it doesn't end with "value",
+                    // we treat this as a top-level property inside "value".
+                    // For example, if jsonPropertyPath was "localized[1].value",
+                    // we already handled that above. But if it's something else,
+                    // we might just set a property inside valueObj.
+
+                    // Extract the property name (excluding array indexing):
+                    // For something like "localized[1].value", lastSegment = "value"
+                    // but we handled that case above. If we get here, it's a different scenario.
+                    // Just in case we encounter a scenario like "artist[1].value.name"
+                    // without the ".value." substring (unlikely if code is consistent),
+                    // we can handle similarly by setting a nested property.
+
+                    SetNestedProperty((JObject)valueObj, lastSegment, newText);
+                }
             }
             else
             {
-                // Just a set patch:
-                var setContent = new JObject();
-                patchContent["set"] = setContent;
+                // Handle sets
+                if (patchContent["set"] == null)
+                {
+                    patchContent["set"] = new JObject();
+                }
 
-                // If the path includes ".value." and we have a complex structure:
-                // For sets, we must set the full property. 
-                // We'll just set the property corresponding to the final segment.
-                // Example: "artist[0].value.description" => set {"artist[0].value.description": newText}
-                // If it's a simple "localized[0].value" => set {"localized[0].value": newText}
-
+                var setContent = (JObject)patchContent["set"];
                 setContent[jsonPropertyPath] = newText;
             }
+        }
 
-            patches.Add(patchObj);
+        // Convert grouped patches to list
+        foreach (var kvp in groupedPatches)
+        {
+            patches.Add(kvp.Value);
         }
 
         return patches;
     }
 
-    private static bool ContainsTargetLanguage(string[] segments, string targetLanguage)
+    private static bool ContainsLanguage(string[] segments)
     {
         foreach (var segment in segments)
         {
-            // Check if segment matches pattern something[lang]
             var lang = ExtractLangKey(segment);
-            if (lang == targetLanguage) return true;
+            if (lang != null) return true;
         }
 
         return false;
@@ -148,11 +172,6 @@ public static class HtmlToJsonConvertor
         string targetLanguage, out bool shouldInsert)
     {
         shouldInsert = false;
-        // We'll build a path like "localized[0].value"
-        // Steps:
-        // 1. For each segment, if it's "something[lang]", find the index in current JArray by _key=lang.
-        // 2. If not found, mark shouldInsert = true and guess where to insert.
-        // 3. For normal segments, just append ".propertyName".
 
         var pathParts = new List<string>();
         JObject currentObj = current;
@@ -162,13 +181,10 @@ public static class HtmlToJsonConvertor
             var lang = ExtractLangKey(segment);
             if (lang != null)
             {
-                // It's an array segment
                 var arrayName = segment.Substring(0, segment.IndexOf('['));
-                // Navigate currentObj to arrayName
                 var arrayToken = currentObj[arrayName];
                 if (arrayToken is JArray arr)
                 {
-                    // find index by _key
                     int idx = -1;
                     for (int k = 0; k < arr.Count; k++)
                     {
@@ -182,15 +198,12 @@ public static class HtmlToJsonConvertor
 
                     if (idx == -1)
                     {
-                        // Not found, we must insert
                         shouldInsert = true;
-                        // We'll just assume index after last
                         idx = arr.Count;
                     }
 
                     pathParts.Add($"{arrayName}[{idx}]");
 
-                    // Move currentObj to that item, if it exists:
                     JObject foundItem = null;
                     if (idx < arr.Count) foundItem = arr[idx] as JObject;
                     if (foundItem != null)
@@ -199,43 +212,35 @@ public static class HtmlToJsonConvertor
                     }
                     else
                     {
-                        // We are going to insert later, so no currentObj
                         currentObj = null;
                     }
                 }
                 else
                 {
-                    // Array not found, must insert
                     shouldInsert = true;
-                    pathParts.Add($"{arrayName}[0]"); // placeholder
+                    pathParts.Add($"{arrayName}[0]");
                     currentObj = null;
                 }
             }
             else
             {
-                // Normal segment
                 pathParts.Add(segment);
-                // If we can, navigate deeper into currentObj
                 if (currentObj != null && currentObj[segment] is JObject childObj)
                 {
                     currentObj = childObj;
                 }
                 else
                 {
-                    // Might be final property or doesn't exist yet
                     currentObj = null;
                 }
             }
         }
 
-        // Join by '.'
         return (string.Join(".", pathParts), 0);
     }
 
-    private static string ExtractLangKey(string segment)
+    private static string? ExtractLangKey(string segment)
     {
-        // segment looks like "localized[en]" or "artist[en]"
-        // or could be "artist" without brackets
         int start = segment.IndexOf('[');
         int end = segment.IndexOf(']');
         if (start > 0 && end > start)
@@ -248,7 +253,6 @@ public static class HtmlToJsonConvertor
 
     private static string GetArrayName(string[] segments)
     {
-        // Find the segment that had language.
         foreach (var s in segments)
         {
             var lang = ExtractLangKey(s);
@@ -258,7 +262,6 @@ public static class HtmlToJsonConvertor
             }
         }
 
-        // fallback
         return segments[0];
     }
 
@@ -274,14 +277,11 @@ public static class HtmlToJsonConvertor
             }
         }
 
-        // default fallback
         return "internationalizedArrayStringValue";
     }
 
     private static void SetNestedProperty(JObject obj, string propertyPath, string value)
     {
-        // propertyPath might be "description" or "name"
-        // or could be nested like "value.description" but we split at ".value." already.
         var parts = propertyPath.Split('.');
         JObject current = obj;
         for (int i = 0; i < parts.Length - 1; i++)

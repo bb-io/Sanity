@@ -87,7 +87,7 @@ public static class JsonToHtmlConverter
                 if (valueToken.Type == JTokenType.String)
                 {
                     var span = doc.CreateElement("span");
-                    span.SetAttributeValue("data-json-path", $"{currentPath}[{lang}]");
+                    span.SetAttributeValue("data-json-path", $"{currentPath}[{lang}].value");
                     span.AppendChild(doc.CreateTextNode(valueToken.ToString()));
                     return span;
                 }
@@ -96,9 +96,9 @@ public static class JsonToHtmlConverter
                     var div = doc.CreateElement("div");
                     div.SetAttributeValue("data-json-path", $"{currentPath}[{lang}]");
 
-                    foreach (var property in complexObj.Properties())
+                    foreach (var property in complexObj.Properties().Where(x => !x.Name.StartsWith("_")))
                     {
-                        string childPath = $"{currentPath}[{lang}].value.{property.Name}";
+                        var childPath = $"{currentPath}[{lang}].value.{property.Name}";
                         var childValue = property.Value;
 
                         if (childValue.Type == JTokenType.String)

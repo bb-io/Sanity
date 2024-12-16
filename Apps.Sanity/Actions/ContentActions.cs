@@ -14,6 +14,7 @@ using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Files;
 using Blackbird.Applications.Sdk.Utils.Extensions.Http;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RestSharp;
 
@@ -102,7 +103,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         var content = jObjects.First();
         var patches = HtmlToJsonConvertor.ToJsonPatches(html, content, request.TargetLanguage);
-        
+
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
             {
