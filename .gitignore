@@ -365,3 +365,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+*.env
+/ConsoleApp1
+/ConsoleApp2
+/ConsoleApp3
+/Tests.Sanity/appsettings.json
