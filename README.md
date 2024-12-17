@@ -32,8 +32,6 @@ Before setting up the integration, ensure that you have access to a Sanity proje
 
 ## Actions
 
-Blackbird provides several actions for interacting with your Sanity content:
-
 - **Search content**: Search for content within a specific dataset. If no dataset is specified, the production dataset is used by default.
 - **Get content**: Retrieve a content object from a specific dataset using its content identifier.
 - **Get content as HTML**: Retrieve localizable content fields as an HTML file.
@@ -41,7 +39,7 @@ Blackbird provides several actions for interacting with your Sanity content:
 - **Create content**: Create a content object based on its type and parameters.
 - **Delete content**: Remove a content object from a dataset using its content identifier.
 
-## HTML Conversion
+## HTML conversion
 
 Please note that this app currently works with the [sanity-plugin-internationalized-array](https://github.com/sanity-io/sanity-plugin-internationalized-array). This means that the app only supports fields of the types **'internationalizedArrayStringValue'** or **'internationalizedArray'**. It will not pick up or update content with a regular string type. Only these field types are supported.
 
@@ -69,13 +67,13 @@ In the future, we plan to support additional localization plugins, such as the [
 
 ## Events
 
-### Webhook Configuration
+### Webhook configuration
 
 To enable webhooks, go to your project page in Sanity.io. Select the **API** tab and click **Create new webhook**. Name the webhook (e.g., Blackbird), add a description, and enter the following URL: `https://bridge.blackbird.io/api/webhooks/sanity`. Select the document actions that will trigger the webhook (we recommend selecting all: create, update, delete). Leave the other settings at their default values. Click **Save**. You should see something like this:
 
 ![webhook_configuration](image/README/webhook_configuration.png)
 
-### Event List
+### Event list
 
 - **On content created**: Triggered when new content is created.
 - **On content updated**: Triggered when existing content is updated.
