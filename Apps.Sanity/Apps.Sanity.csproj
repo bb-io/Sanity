@@ -6,15 +6,15 @@
         <Nullable>enable</Nullable>
         <Product>Sanity [Beta]</Product>
         <Description>Sanity is a modern headless CMS (Content Management System). Sanity uses structured content to endlessly re-use content across any channel and a composable approach to help businesses connect to any third-party technology, data source, and front end framework.</Description>
-        <Version>1.0.4</Version>
+        <Version>1.0.5</Version>
         <PackageId>Apps.Sanity</PackageId>
         <AssemblyName>Apps.Sanity</AssemblyName>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Blackbird.Applications.Sdk.Common" Version="2.11.0" />
+        <PackageReference Include="Blackbird.Applications.Sdk.Common" Version="2.11.1" />
         <PackageReference Include="Blackbird.Applications.SDK.Extensions.FileManagement" Version="1.0.2-alpha3" />
-        <PackageReference Include="Blackbird.Applications.Sdk.Utils" Version="1.0.25" />
+        <PackageReference Include="Blackbird.Applications.Sdk.Utils" Version="1.0.26" />
         <PackageReference Include="HtmlAgilityPack" Version="1.11.71" />
     </ItemGroup>
 
