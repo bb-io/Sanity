@@ -87,7 +87,7 @@ public static class HtmlToJsonConvertor
                     {
                         ["_key"] = targetLanguage,
                         ["_type"] = itemType,
-                        ["value"] = new JObject() 
+                        ["value"] = new JObject()
                     };
                     itemsArray.Add(existingItem);
                 }
@@ -147,47 +147,36 @@ public static class HtmlToJsonConvertor
         return false;
     }
 
-    private static (string jsonPropertyPath, int foundIndex) BuildJsonPropertyPath(JObject current, string[] segments,
-        string targetLanguage, out bool shouldInsert)
+    private static (string jsonPropertyPath, int foundIndex) BuildJsonPropertyPath(
+        JObject current, string[] segments, string targetLanguage, out bool shouldInsert)
     {
         shouldInsert = false;
-
         var pathParts = new List<string>();
         JObject currentObj = current;
+
         for (int i = 0; i < segments.Length; i++)
         {
             var segment = segments[i];
-            var lang = ExtractLangKey(segment);
-            if (lang != null)
+
+            if (currentObj == null)
             {
-                var arrayName = segment.Substring(0, segment.IndexOf('['));
-                var arrayToken = currentObj[arrayName];
-                if (arrayToken is JArray arr)
+                pathParts.Add(segment);
+                continue;
+            }
+
+            int bracketIndex = segment.IndexOf('[');
+            if (bracketIndex > 0 && segment.EndsWith("]"))
+            {
+                var propertyName = segment.Substring(0, bracketIndex);
+                var indexText = segment.Substring(bracketIndex + 1, segment.Length - bracketIndex - 2);
+
+                if (int.TryParse(indexText, out int numericIndex))
                 {
-                    int idx = -1;
-                    for (int k = 0; k < arr.Count; k++)
-                    {
-                        var itemObj = arr[k] as JObject;
-                        if (itemObj?["_key"]?.ToString() == lang)
-                        {
-                            idx = k;
-                            break;
-                        }
-                    }
+                    pathParts.Add($"{propertyName}[{numericIndex}]");
 
-                    if (idx == -1)
+                    if (currentObj[propertyName] is JArray arr && numericIndex < arr.Count)
                     {
-                        shouldInsert = true;
-                        idx = arr.Count;
-                    }
-
-                    pathParts.Add($"{arrayName}[{idx}]");
-
-                    JObject foundItem = null;
-                    if (idx < arr.Count) foundItem = arr[idx] as JObject;
-                    if (foundItem != null)
-                    {
-                        currentObj = foundItem;
+                        currentObj = arr[numericIndex] as JObject;
                     }
                     else
                     {
@@ -196,15 +185,50 @@ public static class HtmlToJsonConvertor
                 }
                 else
                 {
-                    shouldInsert = true;
-                    pathParts.Add($"{arrayName}[0]");
-                    currentObj = null;
+                    var lang = indexText;
+                    var arrayToken = currentObj[propertyName];
+
+                    if (arrayToken is JArray arr)
+                    {
+                        int idx = -1;
+                        for (int k = 0; k < arr.Count; k++)
+                        {
+                            var itemObj = arr[k] as JObject;
+                            if (itemObj?["_key"]?.ToString() == lang)
+                            {
+                                idx = k;
+                                break;
+                            }
+                        }
+
+                        if (idx == -1)
+                        {
+                            shouldInsert = true;
+                            idx = arr.Count;
+                        }
+
+                        pathParts.Add($"{propertyName}[{idx}]");
+
+                        JObject foundItem = null;
+                        if (idx < arr.Count)
+                        {
+                            foundItem = arr[idx] as JObject;
+                        }
+
+                        currentObj = foundItem;
+                    }
+                    else
+                    {
+                        shouldInsert = true;
+                        pathParts.Add($"{propertyName}[0]");
+                        currentObj = null;
+                    }
                 }
             }
             else
             {
                 pathParts.Add(segment);
-                if (currentObj != null && currentObj[segment] is JObject childObj)
+                if (currentObj[segment] is JObject childObj)
                 {
                     currentObj = childObj;
                 }
@@ -217,7 +241,7 @@ public static class HtmlToJsonConvertor
 
         return (string.Join(".", pathParts), 0);
     }
-
+    
     private static string? ExtractLangKey(string segment)
     {
         int start = segment.IndexOf('[');
