@@ -3,6 +3,7 @@ using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses.Content;
 using Blackbird.Applications.Sdk.Common.Exceptions;
 using FluentAssertions;
+using Newtonsoft.Json;
 using Tests.Sanity.Base;
 
 namespace Tests.Sanity;
@@ -22,11 +23,11 @@ public class ContentActionsTests : TestBase
     {
         var request = new SearchContentRequest
         {
-            Types = new[] { "event" }
+            Types = ["article", "snippet"]
         };
 
         await VerifySearchContentAsync(request,
-            result => { return Task.Run(() => result.Items.Should().AllSatisfy(x => x.Type.Should().Be("event"))); });
+            result => { return Task.Run(() => result.Items.Should().AllSatisfy(x => x.Type.Should().BeOneOf("article", "snippet"))); });
     }
 
     [TestMethod]
@@ -149,10 +150,7 @@ public class ContentActionsTests : TestBase
         }
 
         Console.WriteLine(result.TotalCount);
-        foreach (var item in result.Items)
-        {
-            Console.WriteLine($"{item.Id}: {item.Type}");
-        }
+        Console.WriteLine(JsonConvert.SerializeObject(result.Items, Formatting.Indented));
     }
 
     private async Task DeleteContentAsync(string contentID)
