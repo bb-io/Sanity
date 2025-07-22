@@ -53,7 +53,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         return content.Items.First();
     }
 
-    [Action("Get content as HTML", Description = "Get localizable content fields as HTML file")]
+    [Action("Download content", Description = "Get localizable content fields as HTML file")]
     public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
     {
         var groqQuery = $"_id == \"{getContentAsHtmlRequest.ContentId}\"";
@@ -93,45 +93,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         };
     }
     
-    private void CollectReferenceIds(
-        JToken token,
-        bool includeReferenceEntries,
-        bool includeRichTextReferenceEntries,
-        HashSet<string> referenceIds)
-    {
-        if (token is JObject obj)
-        {
-            if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
-            {
-                if (includeReferenceEntries)
-                {
-                    referenceIds.Add(obj["_ref"]!.ToString());
-                }
-            }
-            
-            foreach (var prop in obj.Properties())
-            {
-                CollectReferenceIds(prop.Value, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
-            }
-        }
-        else if (token is JArray array)
-        {
-            foreach (var item in array)
-            {
-                if (includeRichTextReferenceEntries && 
-                    item is JObject itemObj && 
-                    itemObj["_type"]?.ToString() == "reference" && 
-                    itemObj["_ref"] != null)
-                {
-                    referenceIds.Add(itemObj["_ref"]!.ToString());
-                }
-                
-                CollectReferenceIds(item, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
-            }
-        }
-    }
-    
-    [Action("Update content from HTML", Description = "Update localizable content fields from HTML file")]
+    [Action("Upload content", Description = "Update localizable content fields from HTML file")]
     public async Task UpdateContentFromHtmlAsync([ActionParameter] UpdateContentFromHtmlRequest request)
     {
         var file = await fileManagementClient.DownloadAsync(request.File);
@@ -317,6 +279,44 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                     includeReferenceEntries, 
                     includeRichTextReferenceEntries, 
                     referencedEntries);
+            }
+        }
+    }
+    
+    private void CollectReferenceIds(
+        JToken token,
+        bool includeReferenceEntries,
+        bool includeRichTextReferenceEntries,
+        HashSet<string> referenceIds)
+    {
+        if (token is JObject obj)
+        {
+            if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
+            {
+                if (includeReferenceEntries)
+                {
+                    referenceIds.Add(obj["_ref"]!.ToString());
+                }
+            }
+            
+            foreach (var prop in obj.Properties())
+            {
+                CollectReferenceIds(prop.Value, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+            }
+        }
+        else if (token is JArray array)
+        {
+            foreach (var item in array)
+            {
+                if (includeRichTextReferenceEntries && 
+                    item is JObject itemObj && 
+                    itemObj["_type"]?.ToString() == "reference" && 
+                    itemObj["_ref"] != null)
+                {
+                    referenceIds.Add(itemObj["_ref"]!.ToString());
+                }
+                
+                CollectReferenceIds(item, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
             }
         }
     }
