@@ -24,10 +24,6 @@ public static class JsonToHtmlConverter
         metaBlackbird.SetAttributeValue("name", "blackbird-content-id");
         metaBlackbird.SetAttributeValue("content", EscapeHtml(contentId));
         headNode.AppendChild(metaBlackbird);
-        
-        var titleNode = doc.CreateElement("title");
-        titleNode.AppendChild(doc.CreateTextNode("Content"));
-        headNode.AppendChild(titleNode);
 
         var bodyNode = doc.CreateElement("body");
         htmlNode.AppendChild(bodyNode);
@@ -119,6 +115,11 @@ public static class JsonToHtmlConverter
                     }
                     return div;
                 }
+                else if (valueToken is JArray jArrayValue)
+                {
+                    var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(jArrayValue, doc, $"{currentPath}[{lang}].value");
+                    return richTextNode;
+                }
             }
 
             return null;
@@ -153,14 +154,10 @@ public static class JsonToHtmlConverter
 
             if (itemForSource != null)
             {
-                var wrapper = doc.CreateElement("div");
-                wrapper.SetAttributeValue("data-json-path", currentPath);
-
                 var itemNode = ConvertObjectToHtml(doc, itemForSource, currentPath, sourceLanguage);
                 if (itemNode != null)
                 {
-                    wrapper.AppendChild(itemNode);
-                    return wrapper;
+                    return itemNode;
                 }
             }
 
@@ -192,6 +189,7 @@ public static class JsonToHtmlConverter
             string typeStr = typeToken.ToString();
             return typeStr.Contains("internationalizedArray", StringComparison.OrdinalIgnoreCase);
         }
+
         return false;
     }
 

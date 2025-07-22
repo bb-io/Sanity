@@ -72,7 +72,7 @@ public class ContentActionsTests : TestBase
     [TestMethod]
     public async Task GetContentAsHtml_ExistingContent_ShouldNotThrowError()
     {
-        var contentId = "273a4464-4363-4aef-92b8-fc828ef60396";
+        var contentId = "06fd7eee-7e15-443c-bf28-576323974c93";
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content =
             await datasetDataHandler.GetContentAsHtmlAsync(new() { ContentId = contentId, SourceLanguage = "en" });
@@ -90,7 +90,7 @@ public class ContentActionsTests : TestBase
             TargetLanguage = "fr", 
             File = new()
             {
-                Name = "273a4464-4363-4aef-92b8-fc828ef60396.html",
+                Name = "06fd7eee-7e15-443c-bf28-576323974c93.html",
                 ContentType = "text/html"
             }
         });

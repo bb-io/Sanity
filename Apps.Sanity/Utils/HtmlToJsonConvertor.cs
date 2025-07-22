@@ -16,6 +16,29 @@ public static class HtmlToJsonConvertor
         var htmlNode = doc.DocumentNode.SelectSingleNode("//html");
         var sourceLanguage = htmlNode?.GetAttributeValue("lang", "unknown")!;
 
+        // First process the rich text nodes
+        var richTextNodes = doc.DocumentNode.SelectNodes("//*[@data-rich-text='true']");
+        if (richTextNodes != null)
+        {
+            foreach (var richTextNode in richTextNodes)
+            {
+                // Use our new method to create the appropriate patch
+                var richTextPatch = RichTextToJsonConvertor.CreatePatchObject(
+                    richTextNode, 
+                    currentJObject, 
+                    contentId, 
+                    sourceLanguage, 
+                    targetLanguage
+                );
+                
+                if (richTextPatch != null)
+                {
+                    patches.Add(richTextPatch);
+                }
+            }
+        }
+
+        // Then process the regular nodes
         var nodesWithPath = doc.DocumentNode.SelectNodes("//*[@data-json-path]");
         if (nodesWithPath == null)
         {
@@ -23,9 +46,11 @@ public static class HtmlToJsonConvertor
         }
 
         var groupedPatches = new Dictionary<string, JObject>();
-
         foreach (var node in nodesWithPath)
         {
+            if (node.GetAttributeValue("data-rich-text", "false") == "true")
+                continue;
+                
             var dataJsonPath = node.GetAttributeValue("data-json-path", null);
             if (dataJsonPath == null) continue;
 
@@ -44,7 +69,7 @@ public static class HtmlToJsonConvertor
             }
 
             var (jsonPropertyPath, foundKeyIndex) = BuildJsonPropertyPath(currentJObject, parsedPathSegments,
-                targetLanguage, out var shouldInsert);
+                targetLanguage, out var shouldInsertAfter);
 
             if (!groupedPatches.TryGetValue(parentPathKey, out var existingPatch))
             {
@@ -59,8 +84,7 @@ public static class HtmlToJsonConvertor
             }
 
             var patchContent = (JObject)existingPatch["patch"];
-
-            if (shouldInsert)
+            if (shouldInsertAfter)
             {
                 var arrayName = GetArrayName(parsedPathSegments);
                 var itemType = InferInternationalizedType(currentJObject, arrayName);

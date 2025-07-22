@@ -103,6 +103,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         var content = jObjects.First();
         var patches = HtmlToJsonConvertor.ToJsonPatches(html, content, request.TargetLanguage);
+        var jsonPatches = JsonConvert.SerializeObject(patches, Formatting.Indented);
 
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
