@@ -27,7 +27,11 @@ public class ContentActionsTests : TestBase
         };
 
         await VerifySearchContentAsync(request,
-            result => { return Task.Run(() => result.Items.Should().AllSatisfy(x => x.Type.Should().BeOneOf("article", "snippet"))); });
+            result =>
+            {
+                return Task.Run(() =>
+                    result.Items.Should().AllSatisfy(x => x.Type.Should().BeOneOf("article", "snippet")));
+            });
     }
 
     [TestMethod]
@@ -72,10 +76,15 @@ public class ContentActionsTests : TestBase
     [TestMethod]
     public async Task GetContentAsHtml_ExistingContent_ShouldNotThrowError()
     {
-        var contentId = "06fd7eee-7e15-443c-bf28-576323974c93";
+        var contentId = "71a12136-6b14-4a77-bece-bd82fde801cf";
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content =
-            await datasetDataHandler.GetContentAsHtmlAsync(new() { ContentId = contentId, SourceLanguage = "en" });
+            await datasetDataHandler.GetContentAsHtmlAsync(new()
+            {
+                ContentId = contentId, SourceLanguage = "en", 
+                IncludeReferenceEntries = true,
+                IncludeRichTextReferenceEntries = true
+            });
 
         content.File.Name.Should().NotBeNullOrEmpty();
         Console.WriteLine(content.File.Name);
@@ -87,7 +96,7 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         await datasetDataHandler.UpdateContentFromHtmlAsync(new()
         {
-            TargetLanguage = "fr", 
+            TargetLanguage = "fr",
             File = new()
             {
                 Name = "06fd7eee-7e15-443c-bf28-576323974c93.html",

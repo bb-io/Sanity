@@ -70,8 +70,22 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var content = jObjects.First();
-        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage);
-        var memoryStream =  new MemoryStream(Encoding.UTF8.GetBytes(html));
+        
+        // Fetch referenced entries if requested
+        var referencedEntries = new Dictionary<string, JObject>();
+        if (getContentAsHtmlRequest.IncludeReferenceEntries == true || getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true)
+        {
+            await CollectReferencesRecursivelyAsync(
+                content, 
+                getContentAsHtmlRequest.DatasetId,
+                getContentAsHtmlRequest.IncludeReferenceEntries == true,
+                getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true,
+                referencedEntries
+            );
+        }
+
+        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, referencedEntries);
+        var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
         memoryStream.Position = 0;
 
         var fileReference = await fileManagementClient.UploadAsync(memoryStream, "text/html", $"{getContentAsHtmlRequest.ContentId}.html");
@@ -79,6 +93,95 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             File = fileReference
         };
+    }
+    
+    // Helper method to recursively collect all references
+    private async Task CollectReferencesRecursivelyAsync(
+        JObject content,
+        string datasetId,
+        bool includeReferenceEntries,
+        bool includeRichTextReferenceEntries,
+        Dictionary<string, JObject> referencedEntries)
+    {
+        var referenceIds = new HashSet<string>();
+        
+        // Collect reference IDs from the content
+        CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+        
+        // Remove IDs that are already processed
+        referenceIds.RemoveWhere(id => referencedEntries.ContainsKey(id));
+        
+        if (!referenceIds.Any())
+            return;
+            
+        // Fetch all referenced entries
+        var idConditions = string.Join(" || ", referenceIds.Select(id => $"_id == \"{id}\""));
+        var referencedObjects = await SearchContentAsJObjectAsync(new()
+        {
+            DatasetId = datasetId,
+            GroqQuery = idConditions
+        });
+        
+        // Add fetched entries to the dictionary
+        foreach (var entry in referencedObjects)
+        {
+            if (entry["_id"] != null)
+            {
+                var id = entry["_id"].ToString();
+                referencedEntries[id] = entry;
+                
+                // Recursively process this entry's references
+                await CollectReferencesRecursivelyAsync(
+                    entry, 
+                    datasetId, 
+                    includeReferenceEntries, 
+                    includeRichTextReferenceEntries, 
+                    referencedEntries);
+            }
+        }
+    }
+    
+    // Helper method to collect reference IDs from content
+    private void CollectReferenceIds(
+        JToken token,
+        bool includeReferenceEntries,
+        bool includeRichTextReferenceEntries,
+        HashSet<string> referenceIds)
+    {
+        if (token is JObject obj)
+        {
+            // Check if this is a direct reference
+            if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
+            {
+                if (includeReferenceEntries)
+                {
+                    referenceIds.Add(obj["_ref"].ToString());
+                }
+            }
+            
+            // Process all properties
+            foreach (var prop in obj.Properties())
+            {
+                CollectReferenceIds(prop.Value, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+            }
+        }
+        else if (token is JArray array)
+        {
+            // Check each array item
+            foreach (var item in array)
+            {
+                // Special check for rich text references
+                if (includeRichTextReferenceEntries && 
+                    item is JObject itemObj && 
+                    itemObj["_type"]?.ToString() == "reference" && 
+                    itemObj["_ref"] != null)
+                {
+                    referenceIds.Add(itemObj["_ref"].ToString());
+                }
+                
+                CollectReferenceIds(item, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+            }
+        }
     }
     
     [Action("Update content from HTML", Description = "Update localizable content fields from HTML file")]
