@@ -6,12 +6,27 @@ namespace Apps.Sanity.Utils;
 
 public static class RichTextToJsonConvertor
 {
-    public static JArray ConvertFromHtml(HtmlNode richTextNode)
+    public static JObject? CreatePatchObject(HtmlNode richTextNode, JObject currentJObject, string contentId, 
+        string sourceLanguage, string targetLanguage)
     {
-        // If the original JSON is preserved, we can use it as a base
+        var jsonPath = richTextNode.GetAttributeValue("data-json-path", null);
+        if (string.IsNullOrEmpty(jsonPath))
+            return null;
+        
+        var convertedJson = ConvertFromHtml(richTextNode);
+        var basePath = ExtractBasePath(jsonPath);
+        var targetLanguageExists = DoesTargetLanguageExist(currentJObject, basePath, targetLanguage);
+        
+        var contentType = ExtractContentType(currentJObject, basePath, sourceLanguage);
+        return targetLanguageExists 
+            ? CreateReplacePatch(contentId, basePath, targetLanguage, convertedJson, contentType) 
+            : CreateInsertAfterPatch(contentId, basePath, targetLanguage, convertedJson, contentType);
+    }
+    
+    private static JArray ConvertFromHtml(HtmlNode richTextNode)
+    {
         var originalJson = richTextNode.GetAttributeValue("data-original-json", null);
         JArray result;
-        
         if (!string.IsNullOrEmpty(originalJson))
         {
             try
@@ -20,7 +35,6 @@ public static class RichTextToJsonConvertor
             }
             catch
             {
-                // If parsing fails, start with an empty array
                 result = new JArray();
             }
         }
@@ -29,10 +43,7 @@ public static class RichTextToJsonConvertor
             result = new JArray();
         }
         
-        // Clear the array to rebuild it from the HTML
         result.Clear();
-        
-        // Process all children of the rich text container
         foreach (var child in richTextNode.ChildNodes)
         {
             if (child.NodeType == HtmlNodeType.Element)
@@ -48,43 +59,8 @@ public static class RichTextToJsonConvertor
         return result;
     }
     
-    public static JObject CreatePatchObject(HtmlNode richTextNode, JObject currentJObject, string contentId, 
-        string sourceLanguage, string targetLanguage)
-    {
-        // Get the JSON path from the HTML node
-        var jsonPath = richTextNode.GetAttributeValue("data-json-path", null);
-        if (string.IsNullOrEmpty(jsonPath))
-            return null;
-        
-        // Process list items to make sure they're wrapped in proper lists
-        //RichTextToHtmlConvertor.ProcessLists(richTextNode);
-        
-        // Convert the rich text HTML to Sanity-compatible JSON
-        var convertedJson = ConvertFromHtml(richTextNode);
-        
-        // Extract the base path (without language specifier) and check if target language exists
-        var basePath = ExtractBasePath(jsonPath, sourceLanguage);
-        bool targetLanguageExists = DoesTargetLanguageExist(currentJObject, basePath, targetLanguage);
-        
-        // Extract content type from the current object based on the basePath and sourceLanguage
-        string contentType = ExtractContentType(currentJObject, basePath, sourceLanguage);
-        
-        // Create appropriate patch based on whether target language exists
-        if (targetLanguageExists)
-        {
-            // If target language exists, use 'replace'
-            return CreateReplacePatch(contentId, basePath, targetLanguage, convertedJson, contentType);
-        }
-        else
-        {
-            // If target language doesn't exist, use 'insert.after'
-            return CreateInsertAfterPatch(contentId, basePath, targetLanguage, convertedJson, contentType);
-        }
-    }
-    
     private static string ExtractContentType(JObject jObject, string basePath, string sourceLanguage)
     {
-        // Find the content type from the existing object structure
         if (jObject[basePath] is JArray array)
         {
             foreach (var item in array)
@@ -96,25 +72,22 @@ public static class RichTextToJsonConvertor
             }
         }
         
-        // Default fallback if not found
         return "internationalizedArrayBlockContent";
     }
     
-    private static string ExtractBasePath(string jsonPath, string sourceLanguage)
+    private static string ExtractBasePath(string jsonPath)
     {
-        // Extract the base path without the language specifier
-        // Example: "contentMultilingual[en].value" -> "contentMultilingual"
-        int bracketIndex = jsonPath.IndexOf('[');
+        var bracketIndex = jsonPath.IndexOf('[');
         if (bracketIndex > 0)
         {
             return jsonPath.Substring(0, bracketIndex);
         }
+        
         return jsonPath;
     }
     
     private static bool DoesTargetLanguageExist(JObject jObject, string basePath, string targetLanguage)
     {
-        // Check if the target language already exists in the array
         if (jObject[basePath] is JArray array)
         {
             foreach (var item in array)
@@ -130,7 +103,6 @@ public static class RichTextToJsonConvertor
     
     private static JObject CreateReplacePatch(string contentId, string basePath, string targetLanguage, JArray content, string contentType)
     {
-        // Create patch object for replace operation
         var patch = new JObject
         {
             ["patch"] = new JObject
@@ -157,7 +129,6 @@ public static class RichTextToJsonConvertor
     
     private static JObject CreateInsertAfterPatch(string contentId, string basePath, string targetLanguage, JArray content, string contentType)
     {
-        // Create patch object for insert.after operation
         var patch = new JObject
         {
             ["patch"] = new JObject
@@ -182,32 +153,14 @@ public static class RichTextToJsonConvertor
         return patch;
     }
     
-    private static JObject ConvertHtmlElementToBlock(HtmlNode node)
+    private static JObject? ConvertHtmlElementToBlock(HtmlNode node)
     {
-        // Try to get the block key from the data attribute
-        string blockKey = node.GetAttributeValue("data-block-key", null);
-        
         if (node.Name == "li" && node.ParentNode != null)
         {
             return ProcessListItemToBlock(node);
         }
         else if (node.Name == "ul" || node.Name == "ol")
         {
-            // We don't directly convert lists - we process their list items individually
-            var listItems = new JArray();
-            foreach (var child in node.ChildNodes)
-            {
-                if (child.Name == "li")
-                {
-                    var listItemBlock = ProcessListItemToBlock(child);
-                    if (listItemBlock != null)
-                    {
-                        listItems.Add(listItemBlock);
-                    }
-                }
-            }
-            
-            // Return null as we don't want to add the list itself as a block
             return null;
         }
         else if (node.Name == "img")
@@ -218,74 +171,50 @@ public static class RichTextToJsonConvertor
         {
             return ProcessReferenceToBlock(node);
         }
-        else
-        {
-            // Process text blocks (paragraphs, headings, etc.)
-            return ProcessTextToBlock(node);
-        }
+        
+        return ProcessTextToBlock(node);
     }
     
     private static JObject ProcessListItemToBlock(HtmlNode listItemNode)
     {
         var block = new JObject();
-        
-        // Try to get the block key from the data attribute
-        string blockKey = listItemNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
+        var blockKey = listItemNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
         
         block["_key"] = blockKey;
         block["_type"] = "block";
         
-        // First check for data-list-type attribute
-        string listType = listItemNode.GetAttributeValue("data-list-type", null);
-        
-        // If not found, determine list type (bullet/numbered) from parent node
+        var listType = listItemNode.GetAttributeValue("data-list-type", null);
         if (string.IsNullOrEmpty(listType) && listItemNode.ParentNode != null)
         {
-            if (listItemNode.ParentNode.Name == "ol")
-            {
-                listType = "number";
-            }
-            else
-            {
-                listType = "bullet"; // Default to bullet for ul or unknown parent
-            }
+            listType = listItemNode.ParentNode.Name == "ol" ? "number" : "bullet";
         }
         else if (string.IsNullOrEmpty(listType))
         {
-            listType = "bullet"; // Default if no parent or data-list-type
+            listType = "bullet";
         }
         
         block["listItem"] = listType;
-        
-        // Get level from attribute if available, default to 1
-        int level = 1;
-        string levelAttr = listItemNode.GetAttributeValue("data-list-level", null);
+        var level = 1;
+        var levelAttr = listItemNode.GetAttributeValue("data-list-level", null);
         if (!string.IsNullOrEmpty(levelAttr) && int.TryParse(levelAttr, out int parsedLevel))
         {
             level = parsedLevel;
         }
         
         block["level"] = level;
-        
-        // Style is always normal for list items
         block["style"] = "normal";
         
-        // Process children (text content) and collect mark definitions
         var markDefs = new JArray();
         block["children"] = ProcessChildrenToSpans(listItemNode, markDefs);
-        
-        // Add mark definitions to the block
         block["markDefs"] = markDefs;
-        
         return block;
     }
     
     private static JObject ProcessImageToBlock(HtmlNode imgNode)
     {
         var block = new JObject();
-        
-        string blockKey = imgNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
-        string assetRef = imgNode.GetAttributeValue("data-asset-ref", "");
+        var blockKey = imgNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
+        var assetRef = imgNode.GetAttributeValue("data-asset-ref", "");
         
         block["_key"] = blockKey;
         block["_type"] = "image";
@@ -305,13 +234,11 @@ public static class RichTextToJsonConvertor
     private static JObject ProcessReferenceToBlock(HtmlNode refNode)
     {
         var block = new JObject();
-        
-        string blockKey = refNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
-        string refId = refNode.GetAttributeValue("data-ref-id", "");
+        var blockKey = refNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
+        var refId = refNode.GetAttributeValue("data-ref-id", "");
         
         block["_key"] = blockKey;
         block["_type"] = "reference";
-        
         if (!string.IsNullOrEmpty(refId))
         {
             block["_ref"] = refId;
@@ -324,67 +251,38 @@ public static class RichTextToJsonConvertor
     {
         var block = new JObject();
         
-        // Try to get the block key from the data attribute
-        string blockKey = textNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
-        
+        var blockKey = textNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
         block["_key"] = blockKey;
         block["_type"] = "block";
-        
-        // Determine style based on node type
-        string style = "normal";
-        switch (textNode.Name)
+
+        string style = textNode.Name switch
         {
-            case "h1":
-                style = "h1";
-                break;
-            case "h2":
-                style = "h2";
-                break;
-            case "h3":
-                style = "h3";
-                break;
-            case "h4":
-                style = "h4";
-                break;
-            case "h5":
-                style = "h5";
-                break;
-            case "h6":
-                style = "h6";
-                break;
-            case "blockquote":
-                style = "blockquote";
-                break;
-            default:
-                style = "normal";
-                break;
-        }
-        
+            "h1" => "h1",
+            "h2" => "h2",
+            "h3" => "h3",
+            "h4" => "h4",
+            "h5" => "h5",
+            "h6" => "h6",
+            "blockquote" => "blockquote",
+            _ => "normal"
+        };
+
         block["style"] = style;
-        
-        // Process children (text content) and collect mark definitions
         var markDefs = new JArray();
         block["children"] = ProcessChildrenToSpans(textNode, markDefs);
-        
-        // Add mark definitions to the block
         block["markDefs"] = markDefs;
         
         return block;
     }
     
-    private static JArray ProcessChildrenToSpans(HtmlNode parentNode, JArray markDefs = null)
+    private static JArray ProcessChildrenToSpans(HtmlNode parentNode, JArray? markDefs = null)
     {
         var spans = new JArray();
         var currentText = new StringBuilder();
         var currentMarks = new List<string>();
         
-        // Initialize markDefs if not provided
-        if (markDefs == null)
-            markDefs = new JArray();
-        
+        markDefs ??= new JArray();
         ProcessNodeForSpans(parentNode, spans, currentText, currentMarks, markDefs);
-        
-        // Add any remaining text as a final span
         if (currentText.Length > 0)
         {
             spans.Add(CreateSpan(currentText.ToString(), currentMarks));
@@ -402,29 +300,20 @@ public static class RichTextToJsonConvertor
             return;
         }
         
-        // Skip non-element nodes
         if (node.NodeType != HtmlNodeType.Element)
             return;
         
-        // Special handling for span with data-span-key which might contain marks
         if (node.Name == "span" && node.HasAttributes && node.Attributes.Contains("data-span-key"))
         {
-            string spanKey = node.GetAttributeValue("data-span-key", null);
-            
-            // Clear current marks as we're starting a new span with potentially different marks
+            var spanKey = node.GetAttributeValue("data-span-key", null);
             var spanMarks = new List<string>(currentMarks);
-            
-            // If there's pending text, flush it as a span
             if (currentText.Length > 0)
             {
                 spans.Add(CreateSpan(currentText.ToString(), currentMarks));
                 currentText.Clear();
             }
             
-            // Create a new StringBuilder for this span's content
             var spanText = new StringBuilder();
-            
-            // Process all children to collect text and marks
             foreach (var child in node.ChildNodes)
             {
                 if (child.NodeType == HtmlNodeType.Text)
@@ -433,24 +322,19 @@ public static class RichTextToJsonConvertor
                 }
                 else if (child.NodeType == HtmlNodeType.Element)
                 {
-                    // Handle formatting elements within the span
                     if (child.Name == "a" && child.Attributes["href"] != null)
                     {
-                        // Create a mark definition for hyperlink
                         var href = child.GetAttributeValue("href", "");
-                        
-                        // Try to extract any original mark key from data attributes
                         var originalMarkKey = child.GetAttributeValue("data-mark-key", null) ?? 
                                              GenerateSanityCompatibleKey();
                         
-                        // Check if we already have this href in markDefs
-                        bool markExists = false;
+                        var markExists = false;
                         foreach (var existingMark in markDefs)
                         {
                             if (existingMark["_type"]?.ToString() == "link" && 
                                 existingMark["href"]?.ToString() == href)
                             {
-                                originalMarkKey = existingMark["_key"].ToString();
+                                originalMarkKey = existingMark["_key"]!.ToString();
                                 markExists = true;
                                 break;
                             }
@@ -467,10 +351,7 @@ public static class RichTextToJsonConvertor
                             markDefs.Add(markDef);
                         }
                         
-                        // Add the mark reference to this span
                         spanMarks.Add(originalMarkKey);
-                        
-                        // Process the link text
                         spanText.Append(child.InnerText);
                     }
                     else
@@ -478,11 +359,8 @@ public static class RichTextToJsonConvertor
                         var mark = GetMarkFromElement(child.Name);
                         if (mark != null)
                         {
-                            // Add the mark
                             if (!spanMarks.Contains(mark))
                                 spanMarks.Add(mark);
-                            
-                            // Process nested content
                             foreach (var nestedChild in child.ChildNodes)
                             {
                                 if (nestedChild.NodeType == HtmlNodeType.Text)
@@ -493,11 +371,9 @@ public static class RichTextToJsonConvertor
                 }
             }
             
-            // Add the completed span with all collected marks
             JObject spanObj;
             if (!string.IsNullOrEmpty(spanKey))
             {
-                // Use original span key if available
                 spanObj = new JObject
                 {
                     ["_key"] = spanKey,
@@ -515,31 +391,25 @@ public static class RichTextToJsonConvertor
             return;
         }
         
-        // Handle hyperlinks directly (when not inside a span with data-span-key)
         if (node.Name == "a" && node.Attributes["href"] != null)
         {
-            // If there's pending text, flush it as a span
             if (currentText.Length > 0)
             {
                 spans.Add(CreateSpan(currentText.ToString(), currentMarks));
                 currentText.Clear();
             }
             
-            // Create a mark definition for the hyperlink
             var href = node.GetAttributeValue("href", "");
-            
-            // Try to extract any original mark key from data attributes
             var markKey = node.GetAttributeValue("data-mark-key", null) ?? 
                          GenerateSanityCompatibleKey();
             
-            // Check if we already have this href in markDefs
             bool markExists = false;
             foreach (var existingMark in markDefs)
             {
                 if (existingMark["_type"]?.ToString() == "link" && 
                     existingMark["href"]?.ToString() == href)
                 {
-                    markKey = existingMark["_key"].ToString();
+                    markKey = existingMark["_key"]!.ToString();
                     markExists = true;
                     break;
                 }
@@ -556,40 +426,30 @@ public static class RichTextToJsonConvertor
                 markDefs.Add(markDef);
             }
             
-            // Create a new list of marks including the link mark
             var linksMarks = new List<string>(currentMarks) { markKey };
-            
-            // Create a span with the link text and marks
             spans.Add(CreateSpan(node.InnerText, linksMarks));
             return;
         }
         
-        // Handle direct formatting elements (outside spans)
         var elementMark = GetMarkFromElement(node.Name);
         if (elementMark != null)
         {
-            // Add the mark for this formatting
             currentMarks.Add(elementMark);
-            
-            // Process all children with the current marks
             foreach (var child in node.ChildNodes)
             {
                 ProcessNodeForSpans(child, spans, currentText, currentMarks, markDefs);
             }
             
-            // Remove the mark after processing children
             currentMarks.Remove(elementMark);
         }
         else
         {
-            // For non-formatting elements, we need to close the current span and start a new one
             if (currentText.Length > 0)
             {
                 spans.Add(CreateSpan(currentText.ToString(), currentMarks));
                 currentText.Clear();
             }
             
-            // Process all children
             foreach (var child in node.ChildNodes)
             {
                 ProcessNodeForSpans(child, spans, currentText, currentMarks, markDefs);
@@ -597,10 +457,8 @@ public static class RichTextToJsonConvertor
         }
     }
     
-    // Generate a Sanity-compatible key - shorter random string
     private static string GenerateSanityCompatibleKey()
     {
-        // Generate a 12-character alphanumeric key similar to Sanity's format
         var random = new Random();
         const string chars = "abcdefghijklmnopqrstuvwxyz0123456789";
         return new string(Enumerable.Repeat(chars, 12)

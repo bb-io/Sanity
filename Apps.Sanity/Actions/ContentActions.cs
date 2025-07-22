@@ -14,7 +14,6 @@ using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Files;
 using Blackbird.Applications.Sdk.Utils.Extensions.Http;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RestSharp;
 using HtmlAgilityPack;
@@ -71,8 +70,6 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var content = jObjects.First();
-        
-        // Fetch referenced entries if requested
         var referencedEntries = new Dictionary<string, JObject>();
         if (getContentAsHtmlRequest.IncludeReferenceEntries == true || getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true)
         {
@@ -96,53 +93,6 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         };
     }
     
-    // Helper method to recursively collect all references
-    private async Task CollectReferencesRecursivelyAsync(
-        JObject content,
-        string datasetId,
-        bool includeReferenceEntries,
-        bool includeRichTextReferenceEntries,
-        Dictionary<string, JObject> referencedEntries)
-    {
-        var referenceIds = new HashSet<string>();
-        
-        // Collect reference IDs from the content
-        CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
-        
-        // Remove IDs that are already processed
-        referenceIds.RemoveWhere(id => referencedEntries.ContainsKey(id));
-        
-        if (!referenceIds.Any())
-            return;
-            
-        // Fetch all referenced entries
-        var idConditions = string.Join(" || ", referenceIds.Select(id => $"_id == \"{id}\""));
-        var referencedObjects = await SearchContentAsJObjectAsync(new()
-        {
-            DatasetId = datasetId,
-            GroqQuery = idConditions
-        });
-        
-        // Add fetched entries to the dictionary
-        foreach (var entry in referencedObjects)
-        {
-            if (entry["_id"] != null)
-            {
-                var id = entry["_id"].ToString();
-                referencedEntries[id] = entry;
-                
-                // Recursively process this entry's references
-                await CollectReferencesRecursivelyAsync(
-                    entry, 
-                    datasetId, 
-                    includeReferenceEntries, 
-                    includeRichTextReferenceEntries, 
-                    referencedEntries);
-            }
-        }
-    }
-    
-    // Helper method to collect reference IDs from content
     private void CollectReferenceIds(
         JToken token,
         bool includeReferenceEntries,
@@ -151,16 +101,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     {
         if (token is JObject obj)
         {
-            // Check if this is a direct reference
             if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
             {
                 if (includeReferenceEntries)
                 {
-                    referenceIds.Add(obj["_ref"].ToString());
+                    referenceIds.Add(obj["_ref"]!.ToString());
                 }
             }
             
-            // Process all properties
             foreach (var prop in obj.Properties())
             {
                 CollectReferenceIds(prop.Value, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
@@ -168,16 +116,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
         else if (token is JArray array)
         {
-            // Check each array item
             foreach (var item in array)
             {
-                // Special check for rich text references
                 if (includeRichTextReferenceEntries && 
                     item is JObject itemObj && 
                     itemObj["_type"]?.ToString() == "reference" && 
                     itemObj["_ref"] != null)
                 {
-                    referenceIds.Add(itemObj["_ref"].ToString());
+                    referenceIds.Add(itemObj["_ref"]!.ToString());
                 }
                 
                 CollectReferenceIds(item, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
@@ -192,12 +138,10 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var bytes = await file.GetByteData();
         var html = Encoding.Default.GetString(bytes);
         
-        // Extract main content ID and parse the HTML document
         var contentId = HtmlHelper.ExtractContentId(html);
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
         
-        // Fetch the main content to use as a reference for creating patches
         var jObjects = await SearchContentAsJObjectAsync(new()
         {
             DatasetId = request.DatasetId,
@@ -211,12 +155,9 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var mainContent = jObjects.First();
-        
-        // Find all referenced entries in the HTML
         var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc);
         var referencedContents = new Dictionary<string, JObject>();
         
-        // If there are referenced entries, fetch them
         if (referencedContentIds.Any())
         {
             var idConditions = string.Join(" || ", referencedContentIds.Select(id => $"_id == \"{id}\""));
@@ -230,16 +171,12 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             {
                 if (entry["_id"] != null)
                 {
-                    referencedContents[entry["_id"].ToString()] = entry;
+                    referencedContents[entry["_id"]!.ToString()] = entry;
                 }
             }
         }
         
-        // Generate all patches (for both main content and referenced entries)
         var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.TargetLanguage, referencedContents);
-        var allPatchesJson = JsonConvert.SerializeObject(allPatches, Formatting.Indented);
-        
-        // Send the mutations
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
             {
@@ -345,5 +282,42 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var request = new ApiRequest(endpoint, Method.Get, Creds);
         var content = await Client.ExecuteWithErrorHandling<BaseSearchDto<T>>(request);
         return content.Result;
+    }
+    
+    private async Task CollectReferencesRecursivelyAsync(
+        JObject content,
+        string? datasetId,
+        bool includeReferenceEntries,
+        bool includeRichTextReferenceEntries,
+        Dictionary<string, JObject> referencedEntries)
+    {
+        var referenceIds = new HashSet<string>();
+        CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+        referenceIds.RemoveWhere(id => referencedEntries.ContainsKey(id));
+        
+        if (!referenceIds.Any())
+            return;
+            
+        var idConditions = string.Join(" || ", referenceIds.Select(id => $"_id == \"{id}\""));
+        var referencedObjects = await SearchContentAsJObjectAsync(new()
+        {
+            DatasetId = datasetId,
+            GroqQuery = idConditions
+        });
+        
+        foreach (var entry in referencedObjects)
+        {
+            if (entry["_id"] != null)
+            {
+                var id = entry["_id"]!.ToString();
+                referencedEntries[id] = entry;
+                await CollectReferencesRecursivelyAsync(
+                    entry, 
+                    datasetId, 
+                    includeReferenceEntries, 
+                    includeRichTextReferenceEntries, 
+                    referencedEntries);
+            }
+        }
     }
 }

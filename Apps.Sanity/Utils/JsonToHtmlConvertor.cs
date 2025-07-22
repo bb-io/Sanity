@@ -5,7 +5,7 @@ namespace Apps.Sanity.Utils;
 
 public static class JsonToHtmlConverter
 {
-    public static string ToHtml(this JObject jObject, string contentId, string sourceLanguage, Dictionary<string, JObject> referencedEntries = null)
+    public static string ToHtml(this JObject jObject, string contentId, string sourceLanguage, Dictionary<string, JObject>? referencedEntries = null)
     {
         var doc = new HtmlDocument();
 
@@ -28,16 +28,14 @@ public static class JsonToHtmlConverter
         var bodyNode = doc.CreateElement("body");
         htmlNode.AppendChild(bodyNode);
 
-        // Create main content div with content-id
         var mainContentDiv = doc.CreateElement("div");
         mainContentDiv.SetAttributeValue("data-content-id", contentId);
         bodyNode.AppendChild(mainContentDiv);
 
         foreach (var property in jObject.Properties())
         {
-            string propName = property.Name;
-            JToken propValue = property.Value;
-
+            var propName = property.Name;
+            var propValue = property.Value;
             if (propName.StartsWith("_"))
             {
                 continue;
@@ -50,7 +48,6 @@ public static class JsonToHtmlConverter
             }
         }
 
-        // Add referenced entries if available
         if (referencedEntries != null && referencedEntries.Any())
         {
             var referencesSection = doc.CreateElement("div");
@@ -69,7 +66,6 @@ public static class JsonToHtmlConverter
                 refDiv.SetAttributeValue("id", $"ref-{refId}");
                 referencesSection.AppendChild(refDiv);
                 
-                // Content of the referenced entry
                 foreach (var property in refContent.Properties())
                 {
                     string propName = property.Name;
@@ -80,7 +76,7 @@ public static class JsonToHtmlConverter
                         continue;
                     }
 
-                    var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage, null);
+                    var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage);
                     if (convertedNode != null)
                     {
                         refDiv.AppendChild(convertedNode);
@@ -92,27 +88,22 @@ public static class JsonToHtmlConverter
         return doc.DocumentNode.OuterHtml;
     }
 
-    private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath, string sourceLanguage, Dictionary<string, JObject> referencedEntries = null)
+    private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath, string sourceLanguage, Dictionary<string, JObject>? referencedEntries = null)
     {
         if (token is JObject obj)
         {
-            // Check if this is a reference type
             if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null && referencedEntries != null)
             {
-                string refId = obj["_ref"].ToString();
-                
-                // Create a reference div
+                var refId = obj["_ref"]!.ToString();
                 var referenceDiv = doc.CreateElement("div");
                 referenceDiv.SetAttributeValue("data-json-path", currentPath);
                 referenceDiv.SetAttributeValue("data-ref-id", refId);
                 referenceDiv.SetAttributeValue("class", "reference");
                 
-                // Create a link to the referenced content
                 var refLink = doc.CreateElement("a");
                 refLink.SetAttributeValue("href", $"#ref-{refId}");
                 refLink.SetAttributeValue("class", "reference-link");
                 
-                // If we have the referenced content, use its title if available
                 if (referencedEntries.TryGetValue(refId, out var refContent))
                 {
                     var title = GetContentTitle(refContent, sourceLanguage);
@@ -143,7 +134,7 @@ public static class JsonToHtmlConverter
         }
     }
 
-    private static HtmlNode? ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath, string sourceLanguage, Dictionary<string, JObject> referencedEntries = null)
+    private static HtmlNode? ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath, string sourceLanguage, Dictionary<string, JObject>? referencedEntries = null)
     {
         if (IsInternationalizedValue(obj))
         {
@@ -219,7 +210,7 @@ public static class JsonToHtmlConverter
         return hasChildren ? container : null;
     }
 
-    private static HtmlNode? ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath, string sourceLanguage, Dictionary<string, JObject> referencedEntries = null)
+    private static HtmlNode? ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath, string sourceLanguage, Dictionary<string, JObject>? referencedEntries = null)
     {
         if (IsInternationalizedArray(arr))
         {
@@ -240,8 +231,7 @@ public static class JsonToHtmlConverter
         }
 
         var wrapperArr = doc.CreateElement("div");
-        bool hasChildren = false;
-
+        var hasChildren = false;
         for (int i = 0; i < arr.Count; i++)
         {
             var item = arr[i];
@@ -278,22 +268,19 @@ public static class JsonToHtmlConverter
         return System.Net.WebUtility.HtmlEncode(text);
     }
     
-    // Helper method to extract a title from a content object
     private static string GetContentTitle(JObject content, string sourceLanguage)
     {
-        // Try to find a title field
         if (content.TryGetValue("title", out var titleToken))
         {
             if (titleToken is JArray titleArray && IsInternationalizedArray(titleArray))
             {
-                // Try to find the title in the requested language
                 var localizedTitle = titleArray
                     .OfType<JObject>()
                     .FirstOrDefault(o => o["_key"]?.ToString() == sourceLanguage);
                 
                 if (localizedTitle != null && localizedTitle["value"] != null)
                 {
-                    return localizedTitle["value"].ToString();
+                    return localizedTitle["value"]!.ToString();
                 }
             }
             else if (titleToken.Type == JTokenType.String)
@@ -302,7 +289,6 @@ public static class JsonToHtmlConverter
             }
         }
         
-        // If no title found, try to find name or slug
         if (content.TryGetValue("name", out var nameToken) && nameToken.Type == JTokenType.String)
         {
             return nameToken.ToString();
@@ -312,7 +298,7 @@ public static class JsonToHtmlConverter
             slugToken is JObject slugObj &&
             slugObj["current"] != null)
         {
-            return slugObj["current"].ToString();
+            return slugObj["current"]!.ToString();
         }
         
         return string.Empty;

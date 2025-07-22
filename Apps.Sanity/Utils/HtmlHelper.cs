@@ -12,7 +12,6 @@ public static class HtmlHelper
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
-        // First try to get content ID from the meta tag
         var metaNode = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-content-id']");
         if (metaNode != null)
         {
@@ -23,7 +22,6 @@ public static class HtmlHelper
             }
         }
 
-        // If not found, try to get from the main content div
         var mainContentDiv = doc.DocumentNode.SelectSingleNode("//div[@data-content-id]");
         if (mainContentDiv != null)
         {
@@ -41,8 +39,6 @@ public static class HtmlHelper
     public static List<string> ExtractReferencedContentIds(HtmlDocument doc)
     {
         var result = new HashSet<string>();
-
-        // Look for referenced entries in the special container
         var referencesSection = doc.DocumentNode.SelectSingleNode("//div[@id='referenced-entries']");
         if (referencesSection != null)
         {

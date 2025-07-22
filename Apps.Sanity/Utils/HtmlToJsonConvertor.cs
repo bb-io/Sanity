@@ -6,7 +6,7 @@ namespace Apps.Sanity.Utils;
 public static class HtmlToJsonConvertor
 {
     public static List<JObject> ToJsonPatches(string html, JObject mainContent, string targetLanguage, 
-        Dictionary<string, JObject> referencedContents = null)
+        Dictionary<string, JObject>? referencedContents = null)
     {
         var mainContentId = HtmlHelper.ExtractContentId(html);
         var patches = new List<JObject>();
@@ -17,10 +17,7 @@ public static class HtmlToJsonConvertor
         var htmlNode = doc.DocumentNode.SelectSingleNode("//html");
         var sourceLanguage = htmlNode?.GetAttributeValue("lang", "unknown")!;
         
-        // Process main content first
         ProcessContentDiv(doc, mainContentId, mainContent, sourceLanguage, targetLanguage, patches);
-        
-        // Process referenced entries if available
         if (referencedContents != null && referencedContents.Any())
         {
             var refsContainer = doc.DocumentNode.SelectSingleNode("//div[@id='referenced-entries']");
@@ -35,7 +32,6 @@ public static class HtmlToJsonConvertor
                         if (string.IsNullOrEmpty(refId) || !referencedContents.TryGetValue(refId, out var refContent))
                             continue;
                             
-                        // Process each referenced entry
                         ProcessContentDiv(doc, refId, refContent, sourceLanguage, targetLanguage, patches, refDiv);
                     }
                 }
@@ -46,19 +42,16 @@ public static class HtmlToJsonConvertor
     }
     
     private static void ProcessContentDiv(HtmlDocument doc, string contentId, JObject contentObj, 
-        string sourceLanguage, string targetLanguage, List<JObject> patches, HtmlNode contentRoot = null)
+        string sourceLanguage, string targetLanguage, List<JObject> patches, HtmlNode? contentRoot = null)
     {
-        // If no specific content root is provided, look for the main content div
         contentRoot ??= doc.DocumentNode.SelectSingleNode($"//div[@data-content-id='{contentId}']");
         if (contentRoot == null) return;
         
-        // First process the rich text nodes in this content
         var richTextNodes = contentRoot.SelectNodes(".//*[@data-rich-text='true']");
         if (richTextNodes != null)
         {
             foreach (var richTextNode in richTextNodes)
             {
-                // Use our new method to create the appropriate patch
                 var richTextPatch = RichTextToJsonConvertor.CreatePatchObject(
                     richTextNode, 
                     contentObj, 
@@ -74,7 +67,6 @@ public static class HtmlToJsonConvertor
             }
         }
 
-        // Then process the regular nodes with data-json-path
         var nodesWithPath = contentRoot.SelectNodes(".//*[@data-json-path]");
         if (nodesWithPath == null) return;
 
@@ -101,9 +93,7 @@ public static class HtmlToJsonConvertor
                 continue;
             }
 
-            var (jsonPropertyPath, foundKeyIndex) = BuildJsonPropertyPath(contentObj, parsedPathSegments,
-                targetLanguage, out var shouldInsertAfter);
-
+            var jsonPropertyPath = BuildJsonPropertyPath(contentObj, parsedPathSegments, out var shouldInsertAfter);
             if (!groupedPatches.TryGetValue(parentPathKey, out var existingPatch))
             {
                 existingPatch = new JObject
@@ -116,7 +106,7 @@ public static class HtmlToJsonConvertor
                 groupedPatches[parentPathKey] = existingPatch;
             }
 
-            var patchContent = (JObject)existingPatch["patch"];
+            var patchContent = (JObject)existingPatch["patch"]!;
             if (shouldInsertAfter)
             {
                 var arrayName = GetArrayName(parsedPathSegments);
@@ -131,9 +121,8 @@ public static class HtmlToJsonConvertor
                     };
                 }
 
-                var insertContent = (JObject)patchContent["insert"];
-                var itemsArray = (JArray)insertContent["items"];
-
+                var insertContent = (JObject)patchContent["insert"]!;
+                var itemsArray = (JArray)insertContent["items"]!;
                 var existingItem = itemsArray
                     .OfType<JObject>()
                     .FirstOrDefault(i => i["_key"]?.ToString() == targetLanguage);
@@ -146,6 +135,7 @@ public static class HtmlToJsonConvertor
                         ["_type"] = itemType,
                         ["value"] = new JObject()
                     };
+                    
                     itemsArray.Add(existingItem);
                 }
 
@@ -161,7 +151,7 @@ public static class HtmlToJsonConvertor
                 if (jsonPropertyPath.Contains(".value."))
                 {
                     var parts = jsonPropertyPath.Split(new[] { ".value." }, StringSplitOptions.None);
-                    SetNestedProperty((JObject)valueObj, parts[1], newText);
+                    SetNestedProperty((JObject)valueObj!, parts[1], newText);
                 }
                 else if (lastSegment == "value")
                 {
@@ -169,18 +159,17 @@ public static class HtmlToJsonConvertor
                 }
                 else
                 {
-                    SetNestedProperty((JObject)valueObj, lastSegment, newText);
+                    SetNestedProperty((JObject)valueObj!, lastSegment, newText);
                 }
             }
             else
             {
-                // Handle sets
                 if (patchContent["set"] == null)
                 {
                     patchContent["set"] = new JObject();
                 }
 
-                var setContent = (JObject)patchContent["set"];
+                var setContent = (JObject)patchContent["set"]!;
                 setContent[jsonPropertyPath] = newText;
             }
         }
@@ -202,12 +191,11 @@ public static class HtmlToJsonConvertor
         return false;
     }
 
-    private static (string jsonPropertyPath, int foundIndex) BuildJsonPropertyPath(
-        JObject current, string[] segments, string targetLanguage, out bool shouldInsert)
+    private static string BuildJsonPropertyPath(JObject current, string[] segments, out bool shouldInsert)
     {
         shouldInsert = false;
         var pathParts = new List<string>();
-        JObject currentObj = current;
+        var currentObj = current;
 
         for (int i = 0; i < segments.Length; i++)
         {
@@ -264,7 +252,7 @@ public static class HtmlToJsonConvertor
 
                         pathParts.Add($"{propertyName}[{idx}]");
 
-                        JObject foundItem = null;
+                        JObject? foundItem = null;
                         if (idx < arr.Count)
                         {
                             foundItem = arr[idx] as JObject;
@@ -294,7 +282,7 @@ public static class HtmlToJsonConvertor
             }
         }
 
-        return (string.Join(".", pathParts), 0);
+        return string.Join(".", pathParts);
     }
     
     private static string? ExtractLangKey(string segment)
@@ -338,21 +326,20 @@ public static class HtmlToJsonConvertor
         return "internationalizedArrayStringValue";
     }
 
-    private static void SetNestedProperty(JObject obj, string propertyPath, string value)
+    private static void SetNestedProperty(JObject? obj, string propertyPath, string value)
     {
         var parts = propertyPath.Split('.');
-        JObject current = obj;
+        var current = obj;
         for (int i = 0; i < parts.Length - 1; i++)
         {
             var p = parts[i];
-            if (current[p] == null)
-            {
-                current[p] = new JObject();
-            }
-
-            current = (JObject)current[p];
+            current![p] ??= new JObject();
+            current = (JObject)current[p]!;
         }
 
-        current[parts.Last()] = value;
+        if (current != null)
+        {
+            current[parts.Last()] = value;
+        }
     }
 }
