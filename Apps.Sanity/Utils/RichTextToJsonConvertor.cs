@@ -56,6 +56,9 @@ public static class RichTextToJsonConvertor
         if (string.IsNullOrEmpty(jsonPath))
             return null;
         
+        // Process list items to make sure they're wrapped in proper lists
+        //RichTextToHtmlConvertor.ProcessLists(richTextNode);
+        
         // Convert the rich text HTML to Sanity-compatible JSON
         var convertedJson = ConvertFromHtml(richTextNode);
         
@@ -63,17 +66,38 @@ public static class RichTextToJsonConvertor
         var basePath = ExtractBasePath(jsonPath, sourceLanguage);
         bool targetLanguageExists = DoesTargetLanguageExist(currentJObject, basePath, targetLanguage);
         
+        // Extract content type from the current object based on the basePath and sourceLanguage
+        string contentType = ExtractContentType(currentJObject, basePath, sourceLanguage);
+        
         // Create appropriate patch based on whether target language exists
         if (targetLanguageExists)
         {
             // If target language exists, use 'replace'
-            return CreateReplacePatch(contentId, basePath, targetLanguage, convertedJson);
+            return CreateReplacePatch(contentId, basePath, targetLanguage, convertedJson, contentType);
         }
         else
         {
             // If target language doesn't exist, use 'insert.after'
-            return CreateInsertAfterPatch(contentId, basePath, targetLanguage, convertedJson);
+            return CreateInsertAfterPatch(contentId, basePath, targetLanguage, convertedJson, contentType);
         }
+    }
+    
+    private static string ExtractContentType(JObject jObject, string basePath, string sourceLanguage)
+    {
+        // Find the content type from the existing object structure
+        if (jObject[basePath] is JArray array)
+        {
+            foreach (var item in array)
+            {
+                if (item is JObject obj && obj["_key"]?.ToString() == sourceLanguage)
+                {
+                    return obj["_type"]?.ToString() ?? "internationalizedArrayBlockContent";
+                }
+            }
+        }
+        
+        // Default fallback if not found
+        return "internationalizedArrayBlockContent";
     }
     
     private static string ExtractBasePath(string jsonPath, string sourceLanguage)
@@ -104,7 +128,7 @@ public static class RichTextToJsonConvertor
         return false;
     }
     
-    private static JObject CreateReplacePatch(string contentId, string basePath, string targetLanguage, JArray content)
+    private static JObject CreateReplacePatch(string contentId, string basePath, string targetLanguage, JArray content, string contentType)
     {
         // Create patch object for replace operation
         var patch = new JObject
@@ -120,7 +144,7 @@ public static class RichTextToJsonConvertor
                         new JObject
                         {
                             ["_key"] = targetLanguage,
-                            ["_type"] = InferInternationalizedType(basePath, targetLanguage),
+                            ["_type"] = contentType,
                             ["value"] = content
                         }
                     }
@@ -131,7 +155,7 @@ public static class RichTextToJsonConvertor
         return patch;
     }
     
-    private static JObject CreateInsertAfterPatch(string contentId, string basePath, string targetLanguage, JArray content)
+    private static JObject CreateInsertAfterPatch(string contentId, string basePath, string targetLanguage, JArray content, string contentType)
     {
         // Create patch object for insert.after operation
         var patch = new JObject
@@ -147,7 +171,7 @@ public static class RichTextToJsonConvertor
                         new JObject
                         {
                             ["_key"] = targetLanguage,
-                            ["_type"] = InferInternationalizedType(basePath, targetLanguage),
+                            ["_type"] = contentType,
                             ["value"] = content
                         }
                     }
@@ -156,29 +180,6 @@ public static class RichTextToJsonConvertor
         };
         
         return patch;
-    }
-    
-    private static string InferInternationalizedType(string basePath, string targetLanguage)
-    {
-        // We need to determine the correct type for this specific field
-        // Based on the pattern observed in the HTML and basePath
-        
-        // Check if the basePath indicates a specific content type
-        if (basePath.Contains("contentMultilingual"))
-        {
-            return "internationalizedArrayBlockAndSnippetArrayValue";
-        }
-        else if (basePath.Contains("description"))
-        {
-            return "internationalizedArrayBlockContent";
-        }
-        else if (basePath.Contains("title") || basePath.Contains("name"))
-        {
-            return "internationalizedArrayStringValue";
-        }
-        
-        // Default fallback
-        return "internationalizedArrayBlockContent";
     }
     
     private static JObject ConvertHtmlElementToBlock(HtmlNode node)

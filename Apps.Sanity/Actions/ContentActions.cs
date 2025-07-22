@@ -17,6 +17,7 @@ using Blackbird.Applications.Sdk.Utils.Extensions.Http;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RestSharp;
+using HtmlAgilityPack;
 
 namespace Apps.Sanity.Actions;
 
@@ -190,8 +191,13 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var file = await fileManagementClient.DownloadAsync(request.File);
         var bytes = await file.GetByteData();
         var html = Encoding.Default.GetString(bytes);
-        var contentId = HtmlHelper.ExtractContentId(html);
         
+        // Extract main content ID and parse the HTML document
+        var contentId = HtmlHelper.ExtractContentId(html);
+        var doc = new HtmlDocument();
+        doc.LoadHtml(html);
+        
+        // Fetch the main content to use as a reference for creating patches
         var jObjects = await SearchContentAsJObjectAsync(new()
         {
             DatasetId = request.DatasetId,
@@ -204,14 +210,40 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 "No content found for the provided ID. Please verify that the ID is correct and try again.");
         }
 
-        var content = jObjects.First();
-        var patches = HtmlToJsonConvertor.ToJsonPatches(html, content, request.TargetLanguage);
-        var jsonPatches = JsonConvert.SerializeObject(patches, Formatting.Indented);
-
+        var mainContent = jObjects.First();
+        
+        // Find all referenced entries in the HTML
+        var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc);
+        var referencedContents = new Dictionary<string, JObject>();
+        
+        // If there are referenced entries, fetch them
+        if (referencedContentIds.Any())
+        {
+            var idConditions = string.Join(" || ", referencedContentIds.Select(id => $"_id == \"{id}\""));
+            var referencedObjects = await SearchContentAsJObjectAsync(new()
+            {
+                DatasetId = request.DatasetId,
+                GroqQuery = idConditions
+            });
+            
+            foreach (var entry in referencedObjects)
+            {
+                if (entry["_id"] != null)
+                {
+                    referencedContents[entry["_id"].ToString()] = entry;
+                }
+            }
+        }
+        
+        // Generate all patches (for both main content and referenced entries)
+        var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.TargetLanguage, referencedContents);
+        var allPatchesJson = JsonConvert.SerializeObject(allPatches, Formatting.Indented);
+        
+        // Send the mutations
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
             {
-                mutations = patches
+                mutations = allPatches
             });
 
         var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
