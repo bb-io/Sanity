@@ -234,29 +234,47 @@ public static class RichTextToJsonConvertor
         block["_key"] = blockKey;
         block["_type"] = "block";
         
-        // Determine list type (bullet/numbered)
-        string listType = "bullet"; // Default to bullet
-        if (listItemNode.ParentNode != null)
+        // First check for data-list-type attribute
+        string listType = listItemNode.GetAttributeValue("data-list-type", null);
+        
+        // If not found, determine list type (bullet/numbered) from parent node
+        if (string.IsNullOrEmpty(listType) && listItemNode.ParentNode != null)
         {
             if (listItemNode.ParentNode.Name == "ol")
             {
                 listType = "number";
             }
+            else
+            {
+                listType = "bullet"; // Default to bullet for ul or unknown parent
+            }
+        }
+        else if (string.IsNullOrEmpty(listType))
+        {
+            listType = "bullet"; // Default if no parent or data-list-type
         }
         
         block["listItem"] = listType;
         
-        // Level is usually 1 for normal lists
-        block["level"] = 1;
+        // Get level from attribute if available, default to 1
+        int level = 1;
+        string levelAttr = listItemNode.GetAttributeValue("data-list-level", null);
+        if (!string.IsNullOrEmpty(levelAttr) && int.TryParse(levelAttr, out int parsedLevel))
+        {
+            level = parsedLevel;
+        }
+        
+        block["level"] = level;
         
         // Style is always normal for list items
         block["style"] = "normal";
         
-        // Process children (text content)
-        block["children"] = ProcessChildrenToSpans(listItemNode);
+        // Process children (text content) and collect mark definitions
+        var markDefs = new JArray();
+        block["children"] = ProcessChildrenToSpans(listItemNode, markDefs);
         
-        // Empty mark definitions
-        block["markDefs"] = new JArray();
+        // Add mark definitions to the block
+        block["markDefs"] = markDefs;
         
         return block;
     }
@@ -343,22 +361,27 @@ public static class RichTextToJsonConvertor
         
         block["style"] = style;
         
-        // Process children (text content)
-        block["children"] = ProcessChildrenToSpans(textNode);
+        // Process children (text content) and collect mark definitions
+        var markDefs = new JArray();
+        block["children"] = ProcessChildrenToSpans(textNode, markDefs);
         
-        // Empty mark definitions
-        block["markDefs"] = new JArray();
+        // Add mark definitions to the block
+        block["markDefs"] = markDefs;
         
         return block;
     }
     
-    private static JArray ProcessChildrenToSpans(HtmlNode parentNode)
+    private static JArray ProcessChildrenToSpans(HtmlNode parentNode, JArray markDefs = null)
     {
         var spans = new JArray();
         var currentText = new StringBuilder();
         var currentMarks = new List<string>();
         
-        ProcessNodeForSpans(parentNode, spans, currentText, currentMarks);
+        // Initialize markDefs if not provided
+        if (markDefs == null)
+            markDefs = new JArray();
+        
+        ProcessNodeForSpans(parentNode, spans, currentText, currentMarks, markDefs);
         
         // Add any remaining text as a final span
         if (currentText.Length > 0)
@@ -369,7 +392,8 @@ public static class RichTextToJsonConvertor
         return spans;
     }
     
-    private static void ProcessNodeForSpans(HtmlNode node, JArray spans, StringBuilder currentText, List<string> currentMarks)
+    private static void ProcessNodeForSpans(HtmlNode node, JArray spans, StringBuilder currentText, 
+        List<string> currentMarks, JArray markDefs)
     {
         if (node.NodeType == HtmlNodeType.Text)
         {
@@ -409,18 +433,60 @@ public static class RichTextToJsonConvertor
                 else if (child.NodeType == HtmlNodeType.Element)
                 {
                     // Handle formatting elements within the span
-                    var mark = GetMarkFromElement(child.Name);
-                    if (mark != null)
+                    if (child.Name == "a" && child.Attributes["href"] != null)
                     {
-                        // Add the mark
-                        if (!spanMarks.Contains(mark))
-                            spanMarks.Add(mark);
+                        // Create a mark definition for hyperlink
+                        var href = child.GetAttributeValue("href", "");
                         
-                        // Process nested content
-                        foreach (var nestedChild in child.ChildNodes)
+                        // Try to extract any original mark key from data attributes
+                        var originalMarkKey = child.GetAttributeValue("data-mark-key", null) ?? 
+                                             GenerateSanityCompatibleKey();
+                        
+                        // Check if we already have this href in markDefs
+                        bool markExists = false;
+                        foreach (var existingMark in markDefs)
                         {
-                            if (nestedChild.NodeType == HtmlNodeType.Text)
-                                spanText.Append(nestedChild.InnerText);
+                            if (existingMark["_type"]?.ToString() == "link" && 
+                                existingMark["href"]?.ToString() == href)
+                            {
+                                originalMarkKey = existingMark["_key"].ToString();
+                                markExists = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!markExists)
+                        {
+                            var markDef = new JObject
+                            {
+                                ["_key"] = originalMarkKey,
+                                ["_type"] = "link",
+                                ["href"] = href
+                            };
+                            markDefs.Add(markDef);
+                        }
+                        
+                        // Add the mark reference to this span
+                        spanMarks.Add(originalMarkKey);
+                        
+                        // Process the link text
+                        spanText.Append(child.InnerText);
+                    }
+                    else
+                    {
+                        var mark = GetMarkFromElement(child.Name);
+                        if (mark != null)
+                        {
+                            // Add the mark
+                            if (!spanMarks.Contains(mark))
+                                spanMarks.Add(mark);
+                            
+                            // Process nested content
+                            foreach (var nestedChild in child.ChildNodes)
+                            {
+                                if (nestedChild.NodeType == HtmlNodeType.Text)
+                                    spanText.Append(nestedChild.InnerText);
+                            }
                         }
                     }
                 }
@@ -448,6 +514,55 @@ public static class RichTextToJsonConvertor
             return;
         }
         
+        // Handle hyperlinks directly (when not inside a span with data-span-key)
+        if (node.Name == "a" && node.Attributes["href"] != null)
+        {
+            // If there's pending text, flush it as a span
+            if (currentText.Length > 0)
+            {
+                spans.Add(CreateSpan(currentText.ToString(), currentMarks));
+                currentText.Clear();
+            }
+            
+            // Create a mark definition for the hyperlink
+            var href = node.GetAttributeValue("href", "");
+            
+            // Try to extract any original mark key from data attributes
+            var markKey = node.GetAttributeValue("data-mark-key", null) ?? 
+                         GenerateSanityCompatibleKey();
+            
+            // Check if we already have this href in markDefs
+            bool markExists = false;
+            foreach (var existingMark in markDefs)
+            {
+                if (existingMark["_type"]?.ToString() == "link" && 
+                    existingMark["href"]?.ToString() == href)
+                {
+                    markKey = existingMark["_key"].ToString();
+                    markExists = true;
+                    break;
+                }
+            }
+            
+            if (!markExists)
+            {
+                var markDef = new JObject
+                {
+                    ["_key"] = markKey,
+                    ["_type"] = "link",
+                    ["href"] = href
+                };
+                markDefs.Add(markDef);
+            }
+            
+            // Create a new list of marks including the link mark
+            var linksMarks = new List<string>(currentMarks) { markKey };
+            
+            // Create a span with the link text and marks
+            spans.Add(CreateSpan(node.InnerText, linksMarks));
+            return;
+        }
+        
         // Handle direct formatting elements (outside spans)
         var elementMark = GetMarkFromElement(node.Name);
         if (elementMark != null)
@@ -458,7 +573,7 @@ public static class RichTextToJsonConvertor
             // Process all children with the current marks
             foreach (var child in node.ChildNodes)
             {
-                ProcessNodeForSpans(child, spans, currentText, currentMarks);
+                ProcessNodeForSpans(child, spans, currentText, currentMarks, markDefs);
             }
             
             // Remove the mark after processing children
@@ -476,9 +591,19 @@ public static class RichTextToJsonConvertor
             // Process all children
             foreach (var child in node.ChildNodes)
             {
-                ProcessNodeForSpans(child, spans, currentText, currentMarks);
+                ProcessNodeForSpans(child, spans, currentText, currentMarks, markDefs);
             }
         }
+    }
+    
+    // Generate a Sanity-compatible key - shorter random string
+    private static string GenerateSanityCompatibleKey()
+    {
+        // Generate a 12-character alphanumeric key similar to Sanity's format
+        var random = new Random();
+        const string chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+        return new string(Enumerable.Repeat(chars, 12)
+            .Select(s => s[random.Next(s.Length)]).ToArray());
     }
     
     private static string? GetMarkFromElement(string elementName)
