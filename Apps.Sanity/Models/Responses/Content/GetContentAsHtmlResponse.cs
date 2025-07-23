@@ -1,8 +1,9 @@
-﻿using Blackbird.Applications.Sdk.Common.Files;
+﻿using Blackbird.Applications.SDK.Blueprints.Interfaces.CMS;
+using Blackbird.Applications.Sdk.Common.Files;
 
 namespace Apps.Sanity.Models.Responses.Content;
 
-public class GetContentAsHtmlResponse
+public class GetContentAsHtmlResponse : IDownloadContentOutput
 {
-    public FileReference File { get; set; } = default!;
+    public FileReference Content { get; set; } = default!;
 }

@@ -69,8 +69,8 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content = await datasetDataHandler.GetContentAsync(new() { ContentId = contentId });
 
-        content.Id.Should().NotBeNullOrEmpty();
-        Console.WriteLine($"{content.Id}: {content.Type}");
+        content.ContentId.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.ContentId}: {content.Type}");
     }
 
     [TestMethod]
@@ -86,8 +86,8 @@ public class ContentActionsTests : TestBase
                 IncludeRichTextReferenceEntries = true
             });
 
-        content.File.Name.Should().NotBeNullOrEmpty();
-        Console.WriteLine(content.File.Name);
+        content.Content.Name.Should().NotBeNullOrEmpty();
+        Console.WriteLine(content.Content.Name);
     }
 
     [TestMethod]
@@ -96,8 +96,8 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         await datasetDataHandler.UpdateContentFromHtmlAsync(new()
         {
-            TargetLanguage = "fr",
-            File = new()
+            Locale = "fr",
+            Content = new()
             {
                 Name = "06fd7eee-7e15-443c-bf28-576323974c93.html",
                 ContentType = "text/html"
@@ -111,10 +111,10 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content = await datasetDataHandler.CreateContentAsync(new() { Type = "event" });
 
-        content.Id.Should().NotBeNullOrEmpty();
-        Console.WriteLine($"{content.Id}: {content.Type}");
+        content.ContentId.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.ContentId}: {content.Type}");
 
-        await DeleteContentAsync(content.Id);
+        await DeleteContentAsync(content.ContentId);
     }
 
     [TestMethod]
@@ -128,10 +128,10 @@ public class ContentActionsTests : TestBase
             PropertyValues = new[] { $"Test event {Guid.NewGuid()}" }
         });
 
-        content.Id.Should().NotBeNullOrEmpty();
-        Console.WriteLine($"{content.Id}: {content.Type}");
+        content.ContentId.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.ContentId}: {content.Type}");
 
-        await DeleteContentAsync(content.Id);
+        await DeleteContentAsync(content.ContentId);
     }
 
     [TestMethod]

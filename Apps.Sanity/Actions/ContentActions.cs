@@ -7,6 +7,7 @@ using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses;
 using Apps.Sanity.Models.Responses.Content;
 using Apps.Sanity.Utils;
+using Blackbird.Applications.SDK.Blueprints;
 using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Actions;
 using Blackbird.Applications.Sdk.Common.Exceptions;
@@ -14,6 +15,8 @@ using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Files;
 using Blackbird.Applications.Sdk.Utils.Extensions.Http;
+using Blackbird.Filters.Transformations;
+using Blackbird.Filters.Xliff.Xliff2;
 using Newtonsoft.Json.Linq;
 using RestSharp;
 using HtmlAgilityPack;
@@ -54,6 +57,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     }
 
     [Action("Download content", Description = "Get localizable content fields as HTML file")]
+    [BlueprintActionDefinition(BlueprintAction.DownloadContent)]
     public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
     {
         var groqQuery = $"_id == \"{getContentAsHtmlRequest.ContentId}\"";
@@ -89,18 +93,27 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var fileReference = await fileManagementClient.UploadAsync(memoryStream, "text/html", $"{getContentAsHtmlRequest.ContentId}.html");
         return new()
         {
-            File = fileReference
+            Content = fileReference
         };
     }
     
     [Action("Upload content", Description = "Update localizable content fields from HTML file")]
+    [BlueprintActionDefinition(BlueprintAction.UploadContent)]
     public async Task UpdateContentFromHtmlAsync([ActionParameter] UpdateContentFromHtmlRequest request)
     {
-        var file = await fileManagementClient.DownloadAsync(request.File);
+        var file = await fileManagementClient.DownloadAsync(request.Content);
         var bytes = await file.GetByteData();
         var html = Encoding.Default.GetString(bytes);
+        if (Xliff2Serializer.IsXliff2(html))
+        {
+            html = Transformation.Parse(html, request.Content.Name).Target().Serialize();
+            if (html == null)
+            {
+                throw new PluginMisconfigurationException("XLIFF did not contain any files");
+            }
+        }
         
-        var contentId = HtmlHelper.ExtractContentId(html);
+        var contentId = request.ContentId ?? HtmlHelper.ExtractContentId(html);
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
         
@@ -138,7 +151,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             }
         }
         
-        var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.TargetLanguage, referencedContents);
+        var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.Locale, referencedContents);
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
             {

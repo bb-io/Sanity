@@ -1,9 +1,10 @@
 ﻿using Apps.Sanity.Models.Identifiers;
+using Blackbird.Applications.SDK.Blueprints.Interfaces.CMS;
 using Blackbird.Applications.Sdk.Common;
 
 namespace Apps.Sanity.Models.Requests;
 
-public class GetContentAsHtmlRequest : ContentIdentifier
+public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
 {
     [Display("Source language")]
     public string SourceLanguage { get; set; } = string.Empty;

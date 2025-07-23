@@ -3,6 +3,7 @@ using Apps.Sanity.Models.Responses.Content;
 using Apps.Sanity.Utils;
 using Apps.Sanity.Webhooks.Handlers.Content;
 using Apps.Sanity.Webhooks.Models.Requests;
+using Blackbird.Applications.SDK.Blueprints;
 using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.Sdk.Common.Webhooks;
 using Newtonsoft.Json;
@@ -15,6 +16,7 @@ public class ContentWebhooks(InvocationContext invocationContext) : AppInvocable
 {
     [Webhook("On content updated", typeof(ContentUpdatedHandler), 
         Description = "This event is triggered when a content is updated.")]
+    [BlueprintEventDefinition(BlueprintEvent.ContentCreatedOrUpdated)]
     public Task<WebhookResponse<ContentResponse>> OnContentUpdated(WebhookRequest request,
         [WebhookParameter] WebhookFilterRequest filterRequest) => HandleWebhookRequest(request, filterRequest);
 
