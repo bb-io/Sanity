@@ -8,7 +8,7 @@ public static class AuthenticationCredentialsProviderExtensions
 {
     public static Uri BuildUri(this IEnumerable<AuthenticationCredentialsProvider> credentials)
     {
-        const string apiVersion = "v2022-03-07";
+        const string apiVersion = "v2025-02-19";
         
         var projectId = credentials.Get(CredsNames.ProjectId).Value;
         return new($"https://{projectId}.api.sanity.io/{apiVersion}");

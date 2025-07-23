@@ -28,7 +28,7 @@ public static class HtmlToJsonConvertor
                 {
                     foreach (var refDiv in refDivs)
                     {
-                        var refId = refDiv.GetAttributeValue("data-content-id", null);
+                        var refId = refDiv.GetAttributeValue("data-content-id", null!);
                         if (string.IsNullOrEmpty(refId) || !referencedContents.TryGetValue(refId, out var refContent))
                             continue;
                             
@@ -76,7 +76,7 @@ public static class HtmlToJsonConvertor
             if (node.GetAttributeValue("data-rich-text", "false") == "true")
                 continue;
                 
-            var dataJsonPath = node.GetAttributeValue("data-json-path", null);
+            var dataJsonPath = node.GetAttributeValue("data-json-path", null!);
             if (dataJsonPath == null) continue;
 
             var newText = node.InnerText.Trim();

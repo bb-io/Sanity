@@ -12,10 +12,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Blackbird.Applications.Sdk.Common" Version="2.11.1" />
+        <PackageReference Include="Blackbird.Applications.SDK.Blueprints" Version="1.0.0" />
         <PackageReference Include="Blackbird.Applications.SDK.Extensions.FileManagement" Version="1.0.2-alpha3" />
         <PackageReference Include="Blackbird.Applications.Sdk.Utils" Version="1.0.26" />
-        <PackageReference Include="HtmlAgilityPack" Version="1.11.71" />
+        <PackageReference Include="Blackbird.Filters" Version="1.1.10" />
     </ItemGroup>
 
     <ItemGroup>

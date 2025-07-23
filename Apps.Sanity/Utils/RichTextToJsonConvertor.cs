@@ -9,7 +9,7 @@ public static class RichTextToJsonConvertor
     public static JObject? CreatePatchObject(HtmlNode richTextNode, JObject currentJObject, string contentId, 
         string sourceLanguage, string targetLanguage)
     {
-        var jsonPath = richTextNode.GetAttributeValue("data-json-path", null);
+        var jsonPath = richTextNode.GetAttributeValue("data-json-path", null!);
         if (string.IsNullOrEmpty(jsonPath))
             return null;
         
@@ -25,7 +25,7 @@ public static class RichTextToJsonConvertor
     
     private static JArray ConvertFromHtml(HtmlNode richTextNode)
     {
-        var originalJson = richTextNode.GetAttributeValue("data-original-json", null);
+        var originalJson = richTextNode.GetAttributeValue("data-original-json", null!);
         JArray result;
         if (!string.IsNullOrEmpty(originalJson))
         {
@@ -155,7 +155,7 @@ public static class RichTextToJsonConvertor
     
     private static JObject? ConvertHtmlElementToBlock(HtmlNode node)
     {
-        if (node.Name == "li" && node.ParentNode != null)
+        if (node.Name == "li" && node.ParentNode != null!)
         {
             return ProcessListItemToBlock(node);
         }
@@ -183,8 +183,8 @@ public static class RichTextToJsonConvertor
         block["_key"] = blockKey;
         block["_type"] = "block";
         
-        var listType = listItemNode.GetAttributeValue("data-list-type", null);
-        if (string.IsNullOrEmpty(listType) && listItemNode.ParentNode != null)
+        var listType = listItemNode.GetAttributeValue("data-list-type", null!);
+        if (string.IsNullOrEmpty(listType) && listItemNode.ParentNode != null!)
         {
             listType = listItemNode.ParentNode.Name == "ol" ? "number" : "bullet";
         }
@@ -195,7 +195,7 @@ public static class RichTextToJsonConvertor
         
         block["listItem"] = listType;
         var level = 1;
-        var levelAttr = listItemNode.GetAttributeValue("data-list-level", null);
+        var levelAttr = listItemNode.GetAttributeValue("data-list-level", null!);
         if (!string.IsNullOrEmpty(levelAttr) && int.TryParse(levelAttr, out int parsedLevel))
         {
             level = parsedLevel;
@@ -305,7 +305,7 @@ public static class RichTextToJsonConvertor
         
         if (node.Name == "span" && node.HasAttributes && node.Attributes.Contains("data-span-key"))
         {
-            var spanKey = node.GetAttributeValue("data-span-key", null);
+            var spanKey = node.GetAttributeValue("data-span-key", null!);
             var spanMarks = new List<string>(currentMarks);
             if (currentText.Length > 0)
             {
@@ -322,10 +322,10 @@ public static class RichTextToJsonConvertor
                 }
                 else if (child.NodeType == HtmlNodeType.Element)
                 {
-                    if (child.Name == "a" && child.Attributes["href"] != null)
+                    if (child.Name == "a" && child.Attributes["href"] != null!)
                     {
                         var href = child.GetAttributeValue("href", "");
-                        var originalMarkKey = child.GetAttributeValue("data-mark-key", null) ?? 
+                        var originalMarkKey = child.GetAttributeValue("data-mark-key", null!) ?? 
                                              GenerateSanityCompatibleKey();
                         
                         var markExists = false;
@@ -391,7 +391,7 @@ public static class RichTextToJsonConvertor
             return;
         }
         
-        if (node.Name == "a" && node.Attributes["href"] != null)
+        if (node.Name == "a" && node.Attributes["href"] != null!)
         {
             if (currentText.Length > 0)
             {
@@ -400,7 +400,7 @@ public static class RichTextToJsonConvertor
             }
             
             var href = node.GetAttributeValue("href", "");
-            var markKey = node.GetAttributeValue("data-mark-key", null) ?? 
+            var markKey = node.GetAttributeValue("data-mark-key", null!) ?? 
                          GenerateSanityCompatibleKey();
             
             bool markExists = false;

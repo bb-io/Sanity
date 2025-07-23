@@ -15,7 +15,7 @@ public static class HtmlHelper
         var metaNode = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-content-id']");
         if (metaNode != null)
         {
-            var contentId = metaNode.GetAttributeValue("content", null);
+            var contentId = metaNode.GetAttributeValue("content", null!);
             if (!string.IsNullOrEmpty(contentId))
             {
                 return contentId;
@@ -25,7 +25,7 @@ public static class HtmlHelper
         var mainContentDiv = doc.DocumentNode.SelectSingleNode("//div[@data-content-id]");
         if (mainContentDiv != null)
         {
-            var contentId = mainContentDiv.GetAttributeValue("data-content-id", null);
+            var contentId = mainContentDiv.GetAttributeValue("data-content-id", null!);
             if (!string.IsNullOrEmpty(contentId))
             {
                 return contentId;
@@ -47,7 +47,7 @@ public static class HtmlHelper
             {
                 foreach (var div in refDivs)
                 {
-                    var contentId = div.GetAttributeValue("data-content-id", null);
+                    var contentId = div.GetAttributeValue("data-content-id", null!);
                     if (!string.IsNullOrEmpty(contentId) && !contentId.StartsWith("image-"))
                     {
                         result.Add(contentId);

@@ -74,7 +74,7 @@ public static class RichTextToHtmlConvertor
             };
         }
         blockNode.SetAttributeValue("data-block-path", blockPath);
-        blockNode.SetAttributeValue("data-block-key", block["_key"]?.ToString());
+        blockNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
 
         var markDefs = block["markDefs"] as JArray;
         var children = block["children"] as JArray;
@@ -104,7 +104,7 @@ public static class RichTextToHtmlConvertor
         
         var contentNode = doc.CreateTextNode(text);
         var wrapperNode = doc.CreateElement("span");
-        wrapperNode.SetAttributeValue("data-span-key", span["_key"]?.ToString());
+        wrapperNode.SetAttributeValue("data-span-key", span["_key"]?.ToString()!);
         
         if (marks == null || !marks.Any())
         {
@@ -123,7 +123,7 @@ public static class RichTextToHtmlConvertor
                 if (markType == "link")
                 {
                     var linkNode = doc.CreateElement("a");
-                    linkNode.SetAttributeValue("href", markDef["href"]?.ToString());
+                    linkNode.SetAttributeValue("href", markDef["href"]?.ToString()!);
                     linkNode.AppendChild(currentNode);
                     currentNode = linkNode;
                 }
@@ -175,7 +175,7 @@ public static class RichTextToHtmlConvertor
     {
         var imgNode = doc.CreateElement("img");
         imgNode.SetAttributeValue("data-block-path", blockPath);
-        imgNode.SetAttributeValue("data-block-key", block["_key"]?.ToString());
+        imgNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
         
         var assetRef = block["asset"]?["_ref"]?.ToString();
         if (!string.IsNullOrEmpty(assetRef))
@@ -205,7 +205,7 @@ public static class RichTextToHtmlConvertor
     {
         var refNode = doc.CreateElement("div");
         refNode.SetAttributeValue("data-block-path", blockPath);
-        refNode.SetAttributeValue("data-block-key", block["_key"]?.ToString());
+        refNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
         refNode.SetAttributeValue("data-type", "reference");
         
         var refId = block["_ref"]?.ToString();
