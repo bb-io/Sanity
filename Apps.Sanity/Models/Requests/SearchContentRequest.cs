@@ -32,8 +32,9 @@ public class SearchContentRequest : DatasetIdentifier
         
         if (Types != null)
         {
-            var joinedString = string.Join(",", Types);
-            var parameter = $"_type in [\"{joinedString}\"]";
+            var wrappedTypes = Types.Select(x => $"'{x}'").ToList();
+            var joinedString = string.Join(",", wrappedTypes);
+            var parameter = $"_type in [{joinedString}]";
             groq = GroqQueryBuilder.AddParameter(groq, parameter);
         }
 

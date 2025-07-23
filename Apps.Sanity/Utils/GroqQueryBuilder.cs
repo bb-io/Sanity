@@ -6,7 +6,7 @@ public static class GroqQueryBuilder
     {
         if (!string.IsNullOrEmpty(groq))
         {
-            groq += $" && {parameter}";
+            return groq + $" && {parameter}";
         }
 
         return parameter;

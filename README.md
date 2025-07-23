@@ -34,8 +34,8 @@ Before setting up the integration, ensure that you have access to a Sanity proje
 
 - **Search content**: Search for content within a specific dataset. If no dataset is specified, the production dataset is used by default.
 - **Get content**: Retrieve a content object from a specific dataset using its content identifier.
-- **Get content as HTML**: Retrieve localizable content fields as an HTML file.
-- **Update content from HTML**: Update localizable content fields using an HTML file.
+- **Download content**: Retrieve localizable content fields as an HTML file.
+- **Upload content**: Update localizable content fields using an HTML file.
 - **Create content**: Create a content object based on its type and parameters.
 - **Delete content**: Remove a content object from a dataset using its content identifier.
 

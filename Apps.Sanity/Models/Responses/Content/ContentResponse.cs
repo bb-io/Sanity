@@ -1,12 +1,13 @@
-﻿using Blackbird.Applications.Sdk.Common;
+﻿using Blackbird.Applications.SDK.Blueprints.Interfaces.CMS;
+using Blackbird.Applications.Sdk.Common;
 using Newtonsoft.Json;
 
 namespace Apps.Sanity.Models.Responses.Content;
 
-public class ContentResponse
+public class ContentResponse : IDownloadContentInput
 {
     [Display("Content ID"), JsonProperty("_id")]
-    public string Id { get; set; } = string.Empty;
+    public string ContentId { get; set; } = string.Empty;
 
     [Display("Content type"), JsonProperty("_type")]
     public string Type { get; set; } = string.Empty;

@@ -7,6 +7,7 @@ using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses;
 using Apps.Sanity.Models.Responses.Content;
 using Apps.Sanity.Utils;
+using Blackbird.Applications.SDK.Blueprints;
 using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Actions;
 using Blackbird.Applications.Sdk.Common.Exceptions;
@@ -14,9 +15,11 @@ using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Files;
 using Blackbird.Applications.Sdk.Utils.Extensions.Http;
-using Newtonsoft.Json;
+using Blackbird.Filters.Transformations;
+using Blackbird.Filters.Xliff.Xliff2;
 using Newtonsoft.Json.Linq;
 using RestSharp;
+using HtmlAgilityPack;
 
 namespace Apps.Sanity.Actions;
 
@@ -53,7 +56,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         return content.Items.First();
     }
 
-    [Action("Get content as HTML", Description = "Get localizable content fields as HTML file")]
+    [Action("Download content", Description = "Get localizable content fields as HTML file")]
+    [BlueprintActionDefinition(BlueprintAction.DownloadContent)]
     public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
     {
         var groqQuery = $"_id == \"{getContentAsHtmlRequest.ContentId}\"";
@@ -70,24 +74,48 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var content = jObjects.First();
-        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage);
-        var memoryStream =  new MemoryStream(Encoding.UTF8.GetBytes(html));
+        var referencedEntries = new Dictionary<string, JObject>();
+        if (getContentAsHtmlRequest.IncludeReferenceEntries == true || getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true)
+        {
+            await CollectReferencesRecursivelyAsync(
+                content, 
+                getContentAsHtmlRequest.DatasetId,
+                getContentAsHtmlRequest.IncludeReferenceEntries == true,
+                getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true,
+                referencedEntries
+            );
+        }
+
+        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, referencedEntries);
+        var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
         memoryStream.Position = 0;
 
         var fileReference = await fileManagementClient.UploadAsync(memoryStream, "text/html", $"{getContentAsHtmlRequest.ContentId}.html");
         return new()
         {
-            File = fileReference
+            Content = fileReference
         };
     }
     
-    [Action("Update content from HTML", Description = "Update localizable content fields from HTML file")]
+    [Action("Upload content", Description = "Update localizable content fields from HTML file")]
+    [BlueprintActionDefinition(BlueprintAction.UploadContent)]
     public async Task UpdateContentFromHtmlAsync([ActionParameter] UpdateContentFromHtmlRequest request)
     {
-        var file = await fileManagementClient.DownloadAsync(request.File);
+        var file = await fileManagementClient.DownloadAsync(request.Content);
         var bytes = await file.GetByteData();
         var html = Encoding.Default.GetString(bytes);
-        var contentId = HtmlHelper.ExtractContentId(html);
+        if (Xliff2Serializer.IsXliff2(html))
+        {
+            html = Transformation.Parse(html, request.Content.Name).Target().Serialize();
+            if (html == null)
+            {
+                throw new PluginMisconfigurationException("XLIFF did not contain any files");
+            }
+        }
+        
+        var contentId = request.ContentId ?? HtmlHelper.ExtractContentId(html);
+        var doc = new HtmlDocument();
+        doc.LoadHtml(html);
         
         var jObjects = await SearchContentAsJObjectAsync(new()
         {
@@ -101,13 +129,33 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 "No content found for the provided ID. Please verify that the ID is correct and try again.");
         }
 
-        var content = jObjects.First();
-        var patches = HtmlToJsonConvertor.ToJsonPatches(html, content, request.TargetLanguage);
-
+        var mainContent = jObjects.First();
+        var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc);
+        var referencedContents = new Dictionary<string, JObject>();
+        
+        if (referencedContentIds.Any())
+        {
+            var idConditions = string.Join(" || ", referencedContentIds.Select(id => $"_id == \"{id}\""));
+            var referencedObjects = await SearchContentAsJObjectAsync(new()
+            {
+                DatasetId = request.DatasetId,
+                GroqQuery = idConditions
+            });
+            
+            foreach (var entry in referencedObjects)
+            {
+                if (entry["_id"] != null)
+                {
+                    referencedContents[entry["_id"]!.ToString()] = entry;
+                }
+            }
+        }
+        
+        var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.Locale, referencedContents);
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
             {
-                mutations = patches
+                mutations = allPatches
             });
 
         var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
@@ -209,5 +257,80 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var request = new ApiRequest(endpoint, Method.Get, Creds);
         var content = await Client.ExecuteWithErrorHandling<BaseSearchDto<T>>(request);
         return content.Result;
+    }
+    
+    private async Task CollectReferencesRecursivelyAsync(
+        JObject content,
+        string? datasetId,
+        bool includeReferenceEntries,
+        bool includeRichTextReferenceEntries,
+        Dictionary<string, JObject> referencedEntries)
+    {
+        var referenceIds = new HashSet<string>();
+        CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+        referenceIds.RemoveWhere(id => referencedEntries.ContainsKey(id));
+        
+        if (!referenceIds.Any())
+            return;
+            
+        var idConditions = string.Join(" || ", referenceIds.Select(id => $"_id == \"{id}\""));
+        var referencedObjects = await SearchContentAsJObjectAsync(new()
+        {
+            DatasetId = datasetId,
+            GroqQuery = idConditions
+        });
+        
+        foreach (var entry in referencedObjects)
+        {
+            if (entry["_id"] != null)
+            {
+                var id = entry["_id"]!.ToString();
+                referencedEntries[id] = entry;
+                await CollectReferencesRecursivelyAsync(
+                    entry, 
+                    datasetId, 
+                    includeReferenceEntries, 
+                    includeRichTextReferenceEntries, 
+                    referencedEntries);
+            }
+        }
+    }
+    
+    private void CollectReferenceIds(
+        JToken token,
+        bool includeReferenceEntries,
+        bool includeRichTextReferenceEntries,
+        HashSet<string> referenceIds)
+    {
+        if (token is JObject obj)
+        {
+            if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
+            {
+                if (includeReferenceEntries)
+                {
+                    referenceIds.Add(obj["_ref"]!.ToString());
+                }
+            }
+            
+            foreach (var prop in obj.Properties())
+            {
+                CollectReferenceIds(prop.Value, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+            }
+        }
+        else if (token is JArray array)
+        {
+            foreach (var item in array)
+            {
+                if (includeRichTextReferenceEntries && 
+                    item is JObject itemObj && 
+                    itemObj["_type"]?.ToString() == "reference" && 
+                    itemObj["_ref"] != null)
+                {
+                    referenceIds.Add(itemObj["_ref"]!.ToString());
+                }
+                
+                CollectReferenceIds(item, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+            }
+        }
     }
 }

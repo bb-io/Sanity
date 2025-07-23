@@ -3,6 +3,7 @@ using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses.Content;
 using Blackbird.Applications.Sdk.Common.Exceptions;
 using FluentAssertions;
+using Newtonsoft.Json;
 using Tests.Sanity.Base;
 
 namespace Tests.Sanity;
@@ -22,11 +23,15 @@ public class ContentActionsTests : TestBase
     {
         var request = new SearchContentRequest
         {
-            Types = new[] { "event" }
+            Types = ["article", "snippet"]
         };
 
         await VerifySearchContentAsync(request,
-            result => { return Task.Run(() => result.Items.Should().AllSatisfy(x => x.Type.Should().Be("event"))); });
+            result =>
+            {
+                return Task.Run(() =>
+                    result.Items.Should().AllSatisfy(x => x.Type.Should().BeOneOf("article", "snippet")));
+            });
     }
 
     [TestMethod]
@@ -64,20 +69,25 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content = await datasetDataHandler.GetContentAsync(new() { ContentId = contentId });
 
-        content.Id.Should().NotBeNullOrEmpty();
-        Console.WriteLine($"{content.Id}: {content.Type}");
+        content.ContentId.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.ContentId}: {content.Type}");
     }
 
     [TestMethod]
     public async Task GetContentAsHtml_ExistingContent_ShouldNotThrowError()
     {
-        var contentId = "273a4464-4363-4aef-92b8-fc828ef60396";
+        var contentId = "06fd7eee-7e15-443c-bf28-576323974c93";
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content =
-            await datasetDataHandler.GetContentAsHtmlAsync(new() { ContentId = contentId, SourceLanguage = "en" });
+            await datasetDataHandler.GetContentAsHtmlAsync(new()
+            {
+                ContentId = contentId, SourceLanguage = "en", 
+                IncludeReferenceEntries = true,
+                IncludeRichTextReferenceEntries = true
+            });
 
-        content.File.Name.Should().NotBeNullOrEmpty();
-        Console.WriteLine(content.File.Name);
+        content.Content.Name.Should().NotBeNullOrEmpty();
+        Console.WriteLine(content.Content.Name);
     }
 
     [TestMethod]
@@ -86,10 +96,10 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         await datasetDataHandler.UpdateContentFromHtmlAsync(new()
         {
-            TargetLanguage = "fr", 
-            File = new()
+            Locale = "fr",
+            Content = new()
             {
-                Name = "273a4464-4363-4aef-92b8-fc828ef60396.html",
+                Name = "06fd7eee-7e15-443c-bf28-576323974c93.html",
                 ContentType = "text/html"
             }
         });
@@ -101,10 +111,10 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content = await datasetDataHandler.CreateContentAsync(new() { Type = "event" });
 
-        content.Id.Should().NotBeNullOrEmpty();
-        Console.WriteLine($"{content.Id}: {content.Type}");
+        content.ContentId.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.ContentId}: {content.Type}");
 
-        await DeleteContentAsync(content.Id);
+        await DeleteContentAsync(content.ContentId);
     }
 
     [TestMethod]
@@ -118,10 +128,10 @@ public class ContentActionsTests : TestBase
             PropertyValues = new[] { $"Test event {Guid.NewGuid()}" }
         });
 
-        content.Id.Should().NotBeNullOrEmpty();
-        Console.WriteLine($"{content.Id}: {content.Type}");
+        content.ContentId.Should().NotBeNullOrEmpty();
+        Console.WriteLine($"{content.ContentId}: {content.Type}");
 
-        await DeleteContentAsync(content.Id);
+        await DeleteContentAsync(content.ContentId);
     }
 
     [TestMethod]
@@ -149,10 +159,7 @@ public class ContentActionsTests : TestBase
         }
 
         Console.WriteLine(result.TotalCount);
-        foreach (var item in result.Items)
-        {
-            Console.WriteLine($"{item.Id}: {item.Type}");
-        }
+        Console.WriteLine(JsonConvert.SerializeObject(result.Items, Formatting.Indented));
     }
 
     private async Task DeleteContentAsync(string contentID)
