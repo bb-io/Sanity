@@ -102,7 +102,6 @@ public static class RichTextToHtmlConvertor
         var text = span["text"]?.ToString() ?? "";
         var marks = span["marks"] as JArray;
 
-        // For empty text, just append a br tag
         if (string.IsNullOrEmpty(text))
         {
             var brNode = doc.CreateElement("br");
@@ -110,16 +109,13 @@ public static class RichTextToHtmlConvertor
             return;
         }
 
-        // If no marks, just append text directly
         if (marks == null || !marks.Any())
         {
             parentNode.AppendChild(doc.CreateTextNode(text));
             return;
         }
-
-        // Process text with marks
-        HtmlNode formattedNode = doc.CreateTextNode(text);
         
+        HtmlNode formattedNode = doc.CreateTextNode(text);
         foreach (var mark in marks)
         {
             var markId = mark.ToString();

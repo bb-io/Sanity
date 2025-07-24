@@ -255,7 +255,7 @@ public static class RichTextToJsonConvertor
         block["_key"] = blockKey;
         block["_type"] = "block";
 
-        string style = textNode.Name switch
+        var style = textNode.Name switch
         {
             "h1" => "h1",
             "h2" => "h2",
@@ -304,7 +304,7 @@ public static class RichTextToJsonConvertor
         if (node.NodeType != HtmlNodeType.Element)
             return;
         
-        // Handle BR tags as empty spans
+        // Handle BR tags as proper newlines or empty spans
         if (node.Name == "br")
         {
             // Create a span for the accumulated text before the br
@@ -314,28 +314,47 @@ public static class RichTextToJsonConvertor
                 currentText.Clear();
             }
             
-            // Create an empty span for the br itself
-            var emptySpan = new JObject
+            // Add newline to the next span or create an empty span
+            if (node.NextSibling != null && 
+                (node.NextSibling.NodeType == HtmlNodeType.Text || node.NextSibling.NodeType == HtmlNodeType.Element))
             {
-                ["_key"] = GenerateSanityCompatibleKey(),
-                ["_type"] = "span",
-                ["text"] = "",
-                ["marks"] = new JArray()
-            };
-            
-            spans.Add(emptySpan);
+                if (node.NextSibling.NodeType == HtmlNodeType.Text)
+                {
+                    currentText.Append("\n");
+                }
+                else if (node.NextSibling.Name == "br")
+                {
+                    currentText.Append("\n\n");
+                    return; // Skip the next <br> since we've handled it
+                }
+            }
+            else
+            {
+                // Create an empty span for a standalone br
+                var emptySpan = new JObject
+                {
+                    ["_key"] = GenerateSanityCompatibleKey(),
+                    ["_type"] = "span",
+                    ["text"] = "",
+                    ["marks"] = new JArray()
+                };
+                
+                spans.Add(emptySpan);
+            }
             return;
         }
         
-        // Handle links separately as they need markDefs
+        // Handle links with special processing for href attributes
         if (node.Name == "a" && node.Attributes["href"] != null!)
         {
+            // Process any text collected before the link
             if (currentText.Length > 0)
             {
                 spans.Add(CreateSpan(currentText.ToString(), currentMarks));
                 currentText.Clear();
             }
             
+            // Create the link mark definition
             var href = node.GetAttributeValue("href", "");
             var markKey = GenerateSanityCompatibleKey();
             
@@ -362,70 +381,145 @@ public static class RichTextToJsonConvertor
                 markDefs.Add(markDef);
             }
             
+            // Create a new marks list with the link mark added
             var linkMarks = new List<string>(currentMarks) { markKey };
             
-            // Process children of link to maintain any nested formatting
-            var linkText = new StringBuilder();
-            var linkChildMarks = new List<string>(linkMarks);
-            
-            foreach (var child in node.ChildNodes)
-            {
-                if (child.NodeType == HtmlNodeType.Text)
-                {
-                    linkText.Append(child.InnerText);
-                }
-                else if (child.NodeType == HtmlNodeType.Element)
-                {
-                    var childElementMark = GetMarkFromElement(child.Name);
-                    if (childElementMark != null)
-                    {
-                        if (!linkChildMarks.Contains(childElementMark))
-                            linkChildMarks.Add(childElementMark);
-                        
-                        foreach (var nestedChild in child.ChildNodes)
-                        {
-                            if (nestedChild.NodeType == HtmlNodeType.Text)
-                                linkText.Append(nestedChild.InnerText);
-                        }
-                    }
-                }
-            }
-            
-            spans.Add(CreateSpan(linkText.ToString(), linkChildMarks));
+            // Handle links with formatted content inside
+            ProcessFormattedLink(node, spans, linkMarks, markDefs);
             return;
         }
         
-        // Handle formatting elements
+        // Handle formatting elements like b, i, code, etc.
         var elementMark = GetMarkFromElement(node.Name);
         if (elementMark != null)
         {
-            // Add the mark for this formatting element
-            if (!currentMarks.Contains(elementMark))
-                currentMarks.Add(elementMark);
-            
-            // Process children with the current mark applied
-            foreach (var child in node.ChildNodes)
-            {
-                ProcessNodeForSpans(child, spans, currentText, currentMarks, markDefs);
-            }
-            
-            // Remove this mark after processing children
-            currentMarks.Remove(elementMark);
-        }
-        else
-        {
-            // For non-formatting elements (like divs), create a span for accumulated text
-            // before processing children separately
-            if (currentText.Length > 0 && !IsBlockElement(node.Name))
+            // Process any text collected before this formatting element
+            if (currentText.Length > 0)
             {
                 spans.Add(CreateSpan(currentText.ToString(), currentMarks));
                 currentText.Clear();
             }
             
-            // Process all children
+            // Create a new marks list with this formatting mark added
+            var elementMarks = new List<string>(currentMarks);
+            if (!elementMarks.Contains(elementMark))
+                elementMarks.Add(elementMark);
+            
+            // Collect all text within this formatting element
+            var formattedText = new StringBuilder();
+            CollectTextContent(node, formattedText);
+            
+            // Create a span with the formatted text and marks
+            if (formattedText.Length > 0)
+            {
+                spans.Add(CreateSpan(formattedText.ToString(), elementMarks));
+            }
+        }
+        else if (IsBlockElement(node.Name))
+        {
+            // For block elements, process children separately
             foreach (var child in node.ChildNodes)
             {
                 ProcessNodeForSpans(child, spans, currentText, currentMarks, markDefs);
+            }
+        }
+        else
+        {
+            // For other non-formatting elements, just process their children
+            foreach (var child in node.ChildNodes)
+            {
+                ProcessNodeForSpans(child, spans, currentText, currentMarks, markDefs);
+            }
+        }
+    }
+    
+    // New helper method to process links with formatted content
+    private static void ProcessFormattedLink(HtmlNode linkNode, JArray spans, List<string> linkMarks, JArray markDefs)
+    {
+        // For simple links with only text
+        if (!HasFormattingElements(linkNode))
+        {
+            var linkText = new StringBuilder();
+            CollectTextContent(linkNode, linkText);
+            spans.Add(CreateSpan(linkText.ToString(), linkMarks));
+            return;
+        }
+        
+        // For links with formatted content inside
+        var currentText = new StringBuilder();
+        
+        foreach (var child in linkNode.ChildNodes)
+        {
+            if (child.NodeType == HtmlNodeType.Text)
+            {
+                if (currentText.Length > 0)
+                {
+                    spans.Add(CreateSpan(currentText.ToString(), linkMarks));
+                    currentText.Clear();
+                }
+                
+                currentText.Append(child.InnerText);
+            }
+            else if (child.NodeType == HtmlNodeType.Element)
+            {
+                if (currentText.Length > 0)
+                {
+                    spans.Add(CreateSpan(currentText.ToString(), linkMarks));
+                    currentText.Clear();
+                }
+                
+                var elementMark = GetMarkFromElement(child.Name);
+                if (elementMark != null)
+                {
+                    var combinedMarks = new List<string>(linkMarks);
+                    if (!combinedMarks.Contains(elementMark))
+                        combinedMarks.Add(elementMark);
+                    
+                    var formattedText = new StringBuilder();
+                    CollectTextContent(child, formattedText);
+                    
+                    spans.Add(CreateSpan(formattedText.ToString(), combinedMarks));
+                }
+            }
+        }
+        
+        // Add any remaining text
+        if (currentText.Length > 0)
+        {
+            spans.Add(CreateSpan(currentText.ToString(), linkMarks));
+        }
+    }
+    
+    // Helper method to check if a node has any formatting child elements
+    private static bool HasFormattingElements(HtmlNode node)
+    {
+        foreach (var child in node.ChildNodes)
+        {
+            if (child.NodeType == HtmlNodeType.Element && GetMarkFromElement(child.Name) != null)
+                return true;
+        }
+        return false;
+    }
+    
+    // Helper method to collect all text content from a node and its children
+    private static void CollectTextContent(HtmlNode node, StringBuilder textBuilder)
+    {
+        foreach (var child in node.ChildNodes)
+        {
+            if (child.NodeType == HtmlNodeType.Text)
+            {
+                textBuilder.Append(child.InnerText);
+            }
+            else if (child.NodeType == HtmlNodeType.Element)
+            {
+                if (child.Name == "br")
+                {
+                    textBuilder.Append("\n");
+                }
+                else
+                {
+                    CollectTextContent(child, textBuilder);
+                }
             }
         }
     }
@@ -458,11 +552,12 @@ public static class RichTextToJsonConvertor
         };
     }
     
+    // Update CreateSpan to use Sanity-compatible keys
     private static JObject CreateSpan(string text, List<string> marks)
     {
         var span = new JObject
         {
-            ["_key"] = Guid.NewGuid().ToString("N"),
+            ["_key"] = GenerateSanityCompatibleKey(),
             ["_type"] = "span",
             ["text"] = text,
             ["marks"] = new JArray(marks)
