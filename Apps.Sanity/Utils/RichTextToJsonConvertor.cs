@@ -303,6 +303,27 @@ public static class RichTextToJsonConvertor
         if (node.NodeType != HtmlNodeType.Element)
             return;
         
+        if (node.Name == "br" && node.HasAttributes && node.Attributes.Contains("data-span-key"))
+        {
+            if (currentText.Length > 0)
+            {
+                spans.Add(CreateSpan(currentText.ToString(), currentMarks));
+                currentText.Clear();
+            }
+            
+            var spanKey = node.GetAttributeValue("data-span-key", null!);
+            var emptySpan = new JObject
+            {
+                ["_key"] = spanKey,
+                ["_type"] = "span",
+                ["text"] = "",
+                ["marks"] = new JArray()
+            };
+            
+            spans.Add(emptySpan);
+            return;
+        }
+        
         if (node.Name == "span" && node.HasAttributes && node.Attributes.Contains("data-span-key"))
         {
             var spanKey = node.GetAttributeValue("data-span-key", null!);

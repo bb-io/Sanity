@@ -1,3 +1,4 @@
+using Apps.Sanity.Services;
 using HtmlAgilityPack;
 using Newtonsoft.Json.Linq;
 
@@ -5,7 +6,7 @@ namespace Apps.Sanity.Utils;
 
 public static class RichTextToHtmlConvertor
 {
-    public static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath)
+    public static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath, AssetService assetService, string datasetId)
     {
         var wrapper = doc.CreateElement("div");
         wrapper.SetAttributeValue("data-json-path", currentPath);
@@ -16,7 +17,7 @@ public static class RichTextToHtmlConvertor
         {
             if (block is JObject blockObj)
             {
-                var blockNode = ProcessBlock(blockObj, doc, $"{currentPath}");
+                var blockNode = ProcessBlock(blockObj, doc, $"{currentPath}", assetService, datasetId);
                 wrapper.AppendChild(blockNode);
             }
         }
@@ -24,7 +25,7 @@ public static class RichTextToHtmlConvertor
         return wrapper;
     }
 
-    private static HtmlNode ProcessBlock(JObject block, HtmlDocument doc, string basePath)
+    private static HtmlNode ProcessBlock(JObject block, HtmlDocument doc, string basePath, AssetService assetService, string datasetId)
     {
         var blockType = block["_type"]?.ToString();
         var blockKey = block["_key"]?.ToString();
@@ -35,7 +36,7 @@ public static class RichTextToHtmlConvertor
             case "block":
                 return ProcessTextBlock(block, doc, blockPath);
             case "image":
-                return ProcessImageBlock(block, doc, blockPath);
+                return ProcessImageBlock(block, doc, blockPath, assetService, datasetId);
             case "reference":
                 return ProcessReferenceBlock(block, doc, blockPath);
             default:
@@ -101,17 +102,25 @@ public static class RichTextToHtmlConvertor
     {
         var text = span["text"]?.ToString() ?? "";
         var marks = span["marks"] as JArray;
-        
+
+        // For empty text, just return a br tag instead of an empty span
+        if (string.IsNullOrEmpty(text))
+        {
+            var brNode = doc.CreateElement("br");
+            brNode.SetAttributeValue("data-span-key", span["_key"]?.ToString()!);
+            return brNode;
+        }
+
         var contentNode = doc.CreateTextNode(text);
         var wrapperNode = doc.CreateElement("span");
         wrapperNode.SetAttributeValue("data-span-key", span["_key"]?.ToString()!);
-        
+
         if (marks == null || !marks.Any())
         {
             wrapperNode.AppendChild(contentNode);
             return wrapperNode;
         }
-        
+
         HtmlNode currentNode = contentNode;
         foreach (var mark in marks)
         {
@@ -166,20 +175,22 @@ public static class RichTextToHtmlConvertor
                 }
             }
         }
-        
+
         wrapperNode.AppendChild(currentNode);
         return wrapperNode;
     }
 
-    private static HtmlNode ProcessImageBlock(JObject block, HtmlDocument doc, string blockPath)
+    private static HtmlNode ProcessImageBlock(JObject block, HtmlDocument doc, string blockPath, AssetService assetService, string datasetId)
     {
         var imgNode = doc.CreateElement("img");
-        imgNode.SetAttributeValue("data-block-path", blockPath);
-        imgNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
+        imgNode.SetAttributeValue("style", "height: auto; max-width: 50%;");
         
         var assetRef = block["asset"]?["_ref"]?.ToString();
         if (!string.IsNullOrEmpty(assetRef))
         {
+            var assetUrl = assetService.GetAssetUrlAsync(datasetId, assetRef).Result;
+            
+            imgNode.SetAttributeValue("src", assetUrl);
             imgNode.SetAttributeValue("data-asset-ref", assetRef);
             if (assetRef.Contains("-"))
             {
@@ -198,6 +209,8 @@ public static class RichTextToHtmlConvertor
             }
         }
         
+        imgNode.SetAttributeValue("data-block-path", blockPath);
+        imgNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
         return imgNode;
     }
 
@@ -207,13 +220,13 @@ public static class RichTextToHtmlConvertor
         refNode.SetAttributeValue("data-block-path", blockPath);
         refNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
         refNode.SetAttributeValue("data-type", "reference");
-        
+
         var refId = block["_ref"]?.ToString();
         if (!string.IsNullOrEmpty(refId))
         {
             refNode.SetAttributeValue("data-ref-id", refId);
         }
-        
+
         return refNode;
     }
 }
