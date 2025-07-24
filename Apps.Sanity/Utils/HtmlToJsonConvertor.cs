@@ -88,7 +88,7 @@ public static class HtmlToJsonConvertor
             var parentDiv = node.Ancestors("div").FirstOrDefault(d => d.Attributes["data-json-path"] != null);
             var parentPathKey = parentDiv?.GetAttributeValue("data-json-path", "") ?? dataJsonPath;
 
-            if (!ContainsLanguage(parsedPathSegments) || node.Name == "div")
+            if (!ContainsLanguage(parsedPathSegments))
             {
                 continue;
             }

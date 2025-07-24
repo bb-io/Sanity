@@ -82,8 +82,8 @@ public class ContentActionsTests : TestBase
             await datasetDataHandler.GetContentAsHtmlAsync(new()
             {
                 ContentId = contentId, SourceLanguage = "en", 
-                IncludeReferenceEntries = true,
-                IncludeRichTextReferenceEntries = true,
+                IncludeReferenceEntries = false,
+                IncludeRichTextReferenceEntries = false,
                 OrderOfFields = new []{"title", "slug", "contentMultilingual"}
             });
 

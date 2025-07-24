@@ -162,10 +162,10 @@ public static class JsonToHtmlConverter
             {
                 if (valueToken.Type == JTokenType.String)
                 {
-                    var span = doc.CreateElement("span");
-                    span.SetAttributeValue("data-json-path", $"{currentPath}[{lang}].value");
-                    span.AppendChild(doc.CreateTextNode(valueToken.ToString()));
-                    return span;
+                    var div = doc.CreateElement("div");
+                    div.SetAttributeValue("data-json-path", $"{currentPath}[{lang}].value");
+                    div.AppendChild(doc.CreateTextNode(valueToken.ToString()));
+                    return div;
                 }
                 else if (valueToken is JObject complexObj)
                 {
