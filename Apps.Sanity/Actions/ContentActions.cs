@@ -88,7 +88,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var assetService = new AssetService(InvocationContext);
-        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, assetService, getContentAsHtmlRequest.ToString(), referencedEntries);
+        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, assetService, getContentAsHtmlRequest.ToString(), referencedEntries, getContentAsHtmlRequest.OrderOfFields);
         var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
         memoryStream.Position = 0;
 
@@ -268,9 +268,9 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         bool includeRichTextReferenceEntries,
         Dictionary<string, JObject> referencedEntries)
     {
-        var referenceIds = new HashSet<string>();
+        var referenceIds = new List<string>();
         CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
-        referenceIds.RemoveWhere(id => referencedEntries.ContainsKey(id));
+        referenceIds = referenceIds.Where(id => !referencedEntries.ContainsKey(id)).ToList();
 
         if (!referenceIds.Any())
             return;
@@ -282,11 +282,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             GroqQuery = idConditions
         });
 
-        foreach (var entry in referencedObjects)
+        var objectsById = referencedObjects
+            .Where(entry => entry["_id"] != null)
+            .ToDictionary(entry => entry["_id"]!.ToString());
+
+        foreach (var id in referenceIds)
         {
-            if (entry["_id"] != null)
+            if (objectsById.TryGetValue(id, out var entry))
             {
-                var id = entry["_id"]!.ToString();
                 referencedEntries[id] = entry;
                 await CollectReferencesRecursivelyAsync(
                     entry,
@@ -302,20 +305,28 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         JToken token,
         bool includeReferenceEntries,
         bool includeRichTextReferenceEntries,
-        HashSet<string> referenceIds,
+        List<string> referenceIds,
         string? parentPropertyName = null)
     {
         if (token is JObject obj)
         {
             if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
             {
+                if(obj["_ref"]?.ToString().Contains("image") == true)
+                {
+                    return;
+                }
+                
                 var refId = obj["_ref"]!.ToString();
                 bool isRichTextReference = parentPropertyName == "value";
 
                 if ((isRichTextReference && includeRichTextReferenceEntries) ||
                     (!isRichTextReference && includeReferenceEntries))
                 {
-                    referenceIds.Add(refId);
+                    if (!referenceIds.Contains(refId))
+                    {
+                        referenceIds.Add(refId);
+                    }
                 }
             }
 

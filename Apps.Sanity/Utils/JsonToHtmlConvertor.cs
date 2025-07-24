@@ -7,7 +7,8 @@ namespace Apps.Sanity.Utils;
 public static class JsonToHtmlConverter
 {
     public static string ToHtml(this JObject jObject, string contentId, string sourceLanguage, 
-        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null)
+        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null, 
+        IEnumerable<string>? orderOfFields = null)
     {
         var doc = new HtmlDocument();
 
@@ -33,8 +34,15 @@ public static class JsonToHtmlConverter
         var mainContentDiv = doc.CreateElement("div");
         mainContentDiv.SetAttributeValue("data-content-id", contentId);
         bodyNode.AppendChild(mainContentDiv);
-
-        foreach (var property in jObject.Properties())
+        
+        var properties = jObject.Properties().ToList();
+        var orderOfFieldsList = orderOfFields?.ToList() ?? new List<string>();
+        if (orderOfFields != null && orderOfFieldsList.Any())
+        {
+            properties = ReorderProperties(properties, orderOfFieldsList);
+        }
+        
+        foreach (var property in properties)
         {
             var propName = property.Name;
             var propValue = property.Value;
@@ -68,7 +76,13 @@ public static class JsonToHtmlConverter
                 refDiv.SetAttributeValue("id", $"ref-{refId}");
                 referencesSection.AppendChild(refDiv);
                 
-                foreach (var property in refContent.Properties())
+                var referenceProperties = refContent.Properties().ToList();
+                if( orderOfFields != null && orderOfFieldsList.Any())
+                {
+                    referenceProperties = ReorderProperties(referenceProperties, orderOfFieldsList);
+                }
+                
+                foreach (var property in referenceProperties)
                 {
                     string propName = property.Name;
                     JToken propValue = property.Value;
@@ -88,6 +102,18 @@ public static class JsonToHtmlConverter
         }
 
         return doc.DocumentNode.OuterHtml;
+    }
+    
+    private static List<JProperty> ReorderProperties(List<JProperty> properties, List<string> orderOfFields)
+    {
+        var propertyDict = properties.ToDictionary(p => p.Name, p => p);
+        var orderedProperties = orderOfFields
+            .Where(fieldName => propertyDict.ContainsKey(fieldName))
+            .Select(fieldName => propertyDict[fieldName])
+            .ToList();
+            
+        orderedProperties.AddRange(properties.Where(p => !orderOfFields.Contains(p.Name)));
+        return orderedProperties;
     }
 
     private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath, string sourceLanguage,
