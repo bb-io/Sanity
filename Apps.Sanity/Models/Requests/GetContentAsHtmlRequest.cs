@@ -14,4 +14,7 @@ public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
 
     [Display("Include rich text reference entries", Description = "Whether to include references that appear inside rich text fields in the HTML output. These will also be added to the references section.")]
     public bool? IncludeRichTextReferenceEntries { get; set; }
+    
+    [Display("Order of fields", Description = "The order in which the fields should be rendered in the HTML output. If not specified, the order will be determined by the schema.")]
+    public IEnumerable<string>? OrderOfFields { get; set; }
 }

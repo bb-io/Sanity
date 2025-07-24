@@ -6,6 +6,7 @@ using Apps.Sanity.Models.Identifiers;
 using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses;
 using Apps.Sanity.Models.Responses.Content;
+using Apps.Sanity.Services;
 using Apps.Sanity.Utils;
 using Blackbird.Applications.SDK.Blueprints;
 using Blackbird.Applications.Sdk.Common;
@@ -78,7 +79,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         if (getContentAsHtmlRequest.IncludeReferenceEntries == true || getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true)
         {
             await CollectReferencesRecursivelyAsync(
-                content, 
+                content,
                 getContentAsHtmlRequest.DatasetId,
                 getContentAsHtmlRequest.IncludeReferenceEntries == true,
                 getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true,
@@ -86,7 +87,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             );
         }
 
-        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, referencedEntries);
+        var assetService = new AssetService(InvocationContext);
+        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, assetService, getContentAsHtmlRequest.ToString(), referencedEntries, getContentAsHtmlRequest.OrderOfFields);
         var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
         memoryStream.Position = 0;
 
@@ -96,7 +98,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             Content = fileReference
         };
     }
-    
+
     [Action("Upload content", Description = "Update localizable content fields from HTML file")]
     [BlueprintActionDefinition(BlueprintAction.UploadContent)]
     public async Task UpdateContentFromHtmlAsync([ActionParameter] UpdateContentFromHtmlRequest request)
@@ -112,11 +114,11 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 throw new PluginMisconfigurationException("XLIFF did not contain any files");
             }
         }
-        
+
         var contentId = request.ContentId ?? HtmlHelper.ExtractContentId(html);
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
-        
+
         var jObjects = await SearchContentAsJObjectAsync(new()
         {
             DatasetId = request.DatasetId,
@@ -132,7 +134,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var mainContent = jObjects.First();
         var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc);
         var referencedContents = new Dictionary<string, JObject>();
-        
+
         if (referencedContentIds.Any())
         {
             var idConditions = string.Join(" || ", referencedContentIds.Select(id => $"_id == \"{id}\""));
@@ -141,7 +143,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 DatasetId = request.DatasetId,
                 GroqQuery = idConditions
             });
-            
+
             foreach (var entry in referencedObjects)
             {
                 if (entry["_id"] != null)
@@ -150,7 +152,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 }
             }
         }
-        
+
         var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.Locale, referencedContents);
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
@@ -250,7 +252,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         result = result.Where(x => !x["_type"]!.ToString().Contains("system")).ToList();
         return result;
     }
-
+    
     private async Task<List<T>> SearchContentInternalAsync<T>(SearchContentRequest identifier)
     {
         var endpoint = $"/data/query/{identifier}{identifier.BuildGroqQuery()} | order(_createdAt desc)";
@@ -258,7 +260,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var content = await Client.ExecuteWithErrorHandling<BaseSearchDto<T>>(request);
         return content.Result;
     }
-    
+
     private async Task CollectReferencesRecursivelyAsync(
         JObject content,
         string? datasetId,
@@ -266,70 +268,80 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         bool includeRichTextReferenceEntries,
         Dictionary<string, JObject> referencedEntries)
     {
-        var referenceIds = new HashSet<string>();
+        var referenceIds = new List<string>();
         CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
-        referenceIds.RemoveWhere(id => referencedEntries.ContainsKey(id));
-        
+        referenceIds = referenceIds.Where(id => !referencedEntries.ContainsKey(id)).ToList();
+
         if (!referenceIds.Any())
             return;
-            
+
         var idConditions = string.Join(" || ", referenceIds.Select(id => $"_id == \"{id}\""));
         var referencedObjects = await SearchContentAsJObjectAsync(new()
         {
             DatasetId = datasetId,
             GroqQuery = idConditions
         });
-        
-        foreach (var entry in referencedObjects)
+
+        var objectsById = referencedObjects
+            .Where(entry => entry["_id"] != null)
+            .ToDictionary(entry => entry["_id"]!.ToString());
+
+        foreach (var id in referenceIds)
         {
-            if (entry["_id"] != null)
+            if (objectsById.TryGetValue(id, out var entry))
             {
-                var id = entry["_id"]!.ToString();
                 referencedEntries[id] = entry;
                 await CollectReferencesRecursivelyAsync(
-                    entry, 
-                    datasetId, 
-                    includeReferenceEntries, 
-                    includeRichTextReferenceEntries, 
+                    entry,
+                    datasetId,
+                    includeReferenceEntries,
+                    includeRichTextReferenceEntries,
                     referencedEntries);
             }
         }
     }
-    
+
     private void CollectReferenceIds(
         JToken token,
         bool includeReferenceEntries,
         bool includeRichTextReferenceEntries,
-        HashSet<string> referenceIds)
+        List<string> referenceIds,
+        string? parentPropertyName = null)
     {
         if (token is JObject obj)
         {
             if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
             {
-                if (includeReferenceEntries)
+                if(obj["_ref"]?.ToString().Contains("image") == true)
                 {
-                    referenceIds.Add(obj["_ref"]!.ToString());
+                    return;
+                }
+                
+                var refId = obj["_ref"]!.ToString();
+                bool isRichTextReference = parentPropertyName == "value";
+
+                if ((isRichTextReference && includeRichTextReferenceEntries) ||
+                    (!isRichTextReference && includeReferenceEntries))
+                {
+                    if (!referenceIds.Contains(refId))
+                    {
+                        referenceIds.Add(refId);
+                    }
                 }
             }
-            
+
             foreach (var prop in obj.Properties())
             {
-                CollectReferenceIds(prop.Value, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+                CollectReferenceIds(prop.Value, includeReferenceEntries, includeRichTextReferenceEntries,
+                                   referenceIds, prop.Name);
             }
         }
         else if (token is JArray array)
         {
             foreach (var item in array)
             {
-                if (includeRichTextReferenceEntries && 
-                    item is JObject itemObj && 
-                    itemObj["_type"]?.ToString() == "reference" && 
-                    itemObj["_ref"] != null)
-                {
-                    referenceIds.Add(itemObj["_ref"]!.ToString());
-                }
-                
-                CollectReferenceIds(item, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+                CollectReferenceIds(item, includeReferenceEntries, includeRichTextReferenceEntries,
+                                   referenceIds, parentPropertyName);
             }
         }
     }

@@ -1,3 +1,4 @@
+using Apps.Sanity.Services;
 using HtmlAgilityPack;
 using Newtonsoft.Json.Linq;
 
@@ -5,7 +6,7 @@ namespace Apps.Sanity.Utils;
 
 public static class RichTextToHtmlConvertor
 {
-    public static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath)
+    public static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath, AssetService assetService, string datasetId)
     {
         var wrapper = doc.CreateElement("div");
         wrapper.SetAttributeValue("data-json-path", currentPath);
@@ -16,7 +17,7 @@ public static class RichTextToHtmlConvertor
         {
             if (block is JObject blockObj)
             {
-                var blockNode = ProcessBlock(blockObj, doc, $"{currentPath}");
+                var blockNode = ProcessBlock(blockObj, doc, $"{currentPath}", assetService, datasetId);
                 wrapper.AppendChild(blockNode);
             }
         }
@@ -24,7 +25,7 @@ public static class RichTextToHtmlConvertor
         return wrapper;
     }
 
-    private static HtmlNode ProcessBlock(JObject block, HtmlDocument doc, string basePath)
+    private static HtmlNode ProcessBlock(JObject block, HtmlDocument doc, string basePath, AssetService assetService, string datasetId)
     {
         var blockType = block["_type"]?.ToString();
         var blockKey = block["_key"]?.ToString();
@@ -35,7 +36,7 @@ public static class RichTextToHtmlConvertor
             case "block":
                 return ProcessTextBlock(block, doc, blockPath);
             case "image":
-                return ProcessImageBlock(block, doc, blockPath);
+                return ProcessImageBlock(block, doc, blockPath, assetService, datasetId);
             case "reference":
                 return ProcessReferenceBlock(block, doc, blockPath);
             default:
@@ -87,8 +88,7 @@ public static class RichTextToHtmlConvertor
                     var childType = childObj["_type"]?.ToString();
                     if (childType == "span")
                     {
-                        var spanNode = ProcessSpan(childObj, doc, markDefs);
-                        blockNode.AppendChild(spanNode);
+                        AppendSpanContent(childObj, blockNode, doc, markDefs);
                     }
                 }
             }
@@ -97,26 +97,31 @@ public static class RichTextToHtmlConvertor
         return blockNode;
     }
 
-    private static HtmlNode ProcessSpan(JObject span, HtmlDocument doc, JArray? markDefs)
+    private static void AppendSpanContent(JObject span, HtmlNode parentNode, HtmlDocument doc, JArray? markDefs)
     {
         var text = span["text"]?.ToString() ?? "";
+        text = text.Replace("\n", "<br/>");
         var marks = span["marks"] as JArray;
-        
-        var contentNode = doc.CreateTextNode(text);
-        var wrapperNode = doc.CreateElement("span");
-        wrapperNode.SetAttributeValue("data-span-key", span["_key"]?.ToString()!);
-        
+
+        if (string.IsNullOrEmpty(text))
+        {
+            var brNode = doc.CreateElement("br");
+            parentNode.AppendChild(brNode);
+            return;
+        }
+
         if (marks == null || !marks.Any())
         {
-            wrapperNode.AppendChild(contentNode);
-            return wrapperNode;
+            parentNode.AppendChild(doc.CreateTextNode(text));
+            return;
         }
         
-        HtmlNode currentNode = contentNode;
+        HtmlNode formattedNode = doc.CreateTextNode(text);
         foreach (var mark in marks)
         {
             var markId = mark.ToString();
             var markDef = markDefs?.FirstOrDefault(m => m["_key"]?.ToString() == markId);
+            
             if (markDef != null)
             {
                 var markType = markDef["_type"]?.ToString();
@@ -124,8 +129,8 @@ public static class RichTextToHtmlConvertor
                 {
                     var linkNode = doc.CreateElement("a");
                     linkNode.SetAttributeValue("href", markDef["href"]?.ToString()!);
-                    linkNode.AppendChild(currentNode);
-                    currentNode = linkNode;
+                    linkNode.AppendChild(formattedNode);
+                    formattedNode = linkNode;
                 }
             }
             else
@@ -134,52 +139,54 @@ public static class RichTextToHtmlConvertor
                 {
                     case "strong":
                         var strongNode = doc.CreateElement("b");
-                        strongNode.AppendChild(currentNode);
-                        currentNode = strongNode;
+                        strongNode.AppendChild(formattedNode);
+                        formattedNode = strongNode;
                         break;
                     case "em":
                         var emNode = doc.CreateElement("i");
-                        emNode.AppendChild(currentNode);
-                        currentNode = emNode;
+                        emNode.AppendChild(formattedNode);
+                        formattedNode = emNode;
                         break;
                     case "code":
                         var codeNode = doc.CreateElement("code");
-                        codeNode.AppendChild(currentNode);
-                        currentNode = codeNode;
+                        codeNode.AppendChild(formattedNode);
+                        formattedNode = codeNode;
                         break;
                     case "underline":
                         var underlineNode = doc.CreateElement("u");
-                        underlineNode.AppendChild(currentNode);
-                        currentNode = underlineNode;
+                        underlineNode.AppendChild(formattedNode);
+                        formattedNode = underlineNode;
                         break;
                     case "strike-through":
                         var strikeNode = doc.CreateElement("s");
-                        strikeNode.AppendChild(currentNode);
-                        currentNode = strikeNode;
+                        strikeNode.AppendChild(formattedNode);
+                        formattedNode = strikeNode;
                         break;
                     default:
                         var genericMarkNode = doc.CreateElement("span");
                         genericMarkNode.SetAttributeValue("data-mark", markId);
-                        genericMarkNode.AppendChild(currentNode);
-                        currentNode = genericMarkNode;
+                        genericMarkNode.AppendChild(formattedNode);
+                        formattedNode = genericMarkNode;
                         break;
                 }
             }
         }
-        
-        wrapperNode.AppendChild(currentNode);
-        return wrapperNode;
+
+        parentNode.AppendChild(formattedNode);
     }
 
-    private static HtmlNode ProcessImageBlock(JObject block, HtmlDocument doc, string blockPath)
+    private static HtmlNode ProcessImageBlock(JObject block, HtmlDocument doc, string blockPath, AssetService assetService, string datasetId)
     {
         var imgNode = doc.CreateElement("img");
-        imgNode.SetAttributeValue("data-block-path", blockPath);
-        imgNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
+        imgNode.SetAttributeValue("translate", "no");
+        imgNode.SetAttributeValue("style", "height: auto; max-width: 50%;");
         
         var assetRef = block["asset"]?["_ref"]?.ToString();
         if (!string.IsNullOrEmpty(assetRef))
         {
+            var assetUrl = assetService.GetAssetUrlAsync(datasetId, assetRef).Result;
+            
+            imgNode.SetAttributeValue("src", assetUrl);
             imgNode.SetAttributeValue("data-asset-ref", assetRef);
             if (assetRef.Contains("-"))
             {
@@ -198,22 +205,25 @@ public static class RichTextToHtmlConvertor
             }
         }
         
+        imgNode.SetAttributeValue("data-block-path", blockPath);
+        imgNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
         return imgNode;
     }
 
     private static HtmlNode ProcessReferenceBlock(JObject block, HtmlDocument doc, string blockPath)
     {
         var refNode = doc.CreateElement("div");
+        refNode.SetAttributeValue("translate", "no");
         refNode.SetAttributeValue("data-block-path", blockPath);
         refNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
         refNode.SetAttributeValue("data-type", "reference");
-        
+
         var refId = block["_ref"]?.ToString();
         if (!string.IsNullOrEmpty(refId))
         {
             refNode.SetAttributeValue("data-ref-id", refId);
         }
-        
+
         return refNode;
     }
 }

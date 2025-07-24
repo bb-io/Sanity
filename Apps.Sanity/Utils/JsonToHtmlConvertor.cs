@@ -1,11 +1,14 @@
-﻿using HtmlAgilityPack;
+﻿using Apps.Sanity.Services;
+using HtmlAgilityPack;
 using Newtonsoft.Json.Linq;
 
 namespace Apps.Sanity.Utils;
 
 public static class JsonToHtmlConverter
 {
-    public static string ToHtml(this JObject jObject, string contentId, string sourceLanguage, Dictionary<string, JObject>? referencedEntries = null)
+    public static string ToHtml(this JObject jObject, string contentId, string sourceLanguage, 
+        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null, 
+        IEnumerable<string>? orderOfFields = null)
     {
         var doc = new HtmlDocument();
 
@@ -31,8 +34,15 @@ public static class JsonToHtmlConverter
         var mainContentDiv = doc.CreateElement("div");
         mainContentDiv.SetAttributeValue("data-content-id", contentId);
         bodyNode.AppendChild(mainContentDiv);
-
-        foreach (var property in jObject.Properties())
+        
+        var properties = jObject.Properties().ToList();
+        var orderOfFieldsList = orderOfFields?.ToList() ?? new List<string>();
+        if (orderOfFields != null && orderOfFieldsList.Any())
+        {
+            properties = ReorderProperties(properties, orderOfFieldsList);
+        }
+        
+        foreach (var property in properties)
         {
             var propName = property.Name;
             var propValue = property.Value;
@@ -41,7 +51,7 @@ public static class JsonToHtmlConverter
                 continue;
             }
 
-            var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage, referencedEntries);
+            var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage, assetService, datasetId, referencedEntries);
             if (convertedNode != null)
             {
                 mainContentDiv.AppendChild(convertedNode);
@@ -66,7 +76,13 @@ public static class JsonToHtmlConverter
                 refDiv.SetAttributeValue("id", $"ref-{refId}");
                 referencesSection.AppendChild(refDiv);
                 
-                foreach (var property in refContent.Properties())
+                var referenceProperties = refContent.Properties().ToList();
+                if( orderOfFields != null && orderOfFieldsList.Any())
+                {
+                    referenceProperties = ReorderProperties(referenceProperties, orderOfFieldsList);
+                }
+                
+                foreach (var property in referenceProperties)
                 {
                     string propName = property.Name;
                     JToken propValue = property.Value;
@@ -76,7 +92,7 @@ public static class JsonToHtmlConverter
                         continue;
                     }
 
-                    var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage);
+                    var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage, assetService, datasetId);
                     if (convertedNode != null)
                     {
                         refDiv.AppendChild(convertedNode);
@@ -87,8 +103,21 @@ public static class JsonToHtmlConverter
 
         return doc.DocumentNode.OuterHtml;
     }
+    
+    private static List<JProperty> ReorderProperties(List<JProperty> properties, List<string> orderOfFields)
+    {
+        var propertyDict = properties.ToDictionary(p => p.Name, p => p);
+        var orderedProperties = orderOfFields
+            .Where(fieldName => propertyDict.ContainsKey(fieldName))
+            .Select(fieldName => propertyDict[fieldName])
+            .ToList();
+            
+        orderedProperties.AddRange(properties.Where(p => !orderOfFields.Contains(p.Name)));
+        return orderedProperties;
+    }
 
-    private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath, string sourceLanguage, Dictionary<string, JObject>? referencedEntries = null)
+    private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath, string sourceLanguage,
+        AssetService assetService, string datasetId,  Dictionary<string, JObject>? referencedEntries = null)
     {
         if (token is JObject obj)
         {
@@ -99,30 +128,14 @@ public static class JsonToHtmlConverter
                 referenceDiv.SetAttributeValue("data-json-path", currentPath);
                 referenceDiv.SetAttributeValue("data-ref-id", refId);
                 referenceDiv.SetAttributeValue("class", "reference");
-                
-                var refLink = doc.CreateElement("a");
-                refLink.SetAttributeValue("href", $"#ref-{refId}");
-                refLink.SetAttributeValue("class", "reference-link");
-                
-                if (referencedEntries.TryGetValue(refId, out var refContent))
-                {
-                    var title = GetContentTitle(refContent, sourceLanguage);
-                    refLink.InnerHtml = !string.IsNullOrEmpty(title) ? title : $"Reference: {refId}";
-                }
-                else
-                {
-                    refLink.InnerHtml = $"Reference: {refId}";
-                }
-                
-                referenceDiv.AppendChild(refLink);
                 return referenceDiv;
             }
             
-            return ConvertObjectToHtml(doc, obj, currentPath, sourceLanguage, referencedEntries);
+            return ConvertObjectToHtml(doc, obj, currentPath, sourceLanguage, assetService, datasetId, referencedEntries);
         }
         else if (token is JArray arr)
         {
-            return ConvertArrayToHtml(doc, arr, currentPath, sourceLanguage, referencedEntries);
+            return ConvertArrayToHtml(doc, arr, currentPath, sourceLanguage, assetService, datasetId, referencedEntries);
         }
         else if (token is JValue)
         {
@@ -134,7 +147,8 @@ public static class JsonToHtmlConverter
         }
     }
 
-    private static HtmlNode? ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath, string sourceLanguage, Dictionary<string, JObject>? referencedEntries = null)
+    private static HtmlNode? ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath, string sourceLanguage,
+        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null)
     {
         if (IsInternationalizedValue(obj))
         {
@@ -148,10 +162,10 @@ public static class JsonToHtmlConverter
             {
                 if (valueToken.Type == JTokenType.String)
                 {
-                    var span = doc.CreateElement("span");
-                    span.SetAttributeValue("data-json-path", $"{currentPath}[{lang}].value");
-                    span.AppendChild(doc.CreateTextNode(valueToken.ToString()));
-                    return span;
+                    var div = doc.CreateElement("div");
+                    div.SetAttributeValue("data-json-path", $"{currentPath}[{lang}].value");
+                    div.AppendChild(doc.CreateTextNode(valueToken.ToString()));
+                    return div;
                 }
                 else if (valueToken is JObject complexObj)
                 {
@@ -172,7 +186,7 @@ public static class JsonToHtmlConverter
                         }
                         else
                         {
-                            var childNode = ConvertTokenToHtml(doc, childValue, childPath, sourceLanguage, referencedEntries);
+                            var childNode = ConvertTokenToHtml(doc, childValue, childPath, sourceLanguage, assetService, datasetId, referencedEntries);
                             if (childNode != null)
                             {
                                 div.AppendChild(childNode);
@@ -183,7 +197,7 @@ public static class JsonToHtmlConverter
                 }
                 else if (valueToken is JArray jArrayValue)
                 {
-                    var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(jArrayValue, doc, $"{currentPath}[{lang}].value");
+                    var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(jArrayValue, doc, $"{currentPath}[{lang}].value", assetService, datasetId);
                     return richTextNode;
                 }
             }
@@ -199,7 +213,7 @@ public static class JsonToHtmlConverter
             if (property.Name.StartsWith("_")) continue; 
 
             string childPath = currentPath == null ? property.Name : $"{currentPath}.{property.Name}";
-            var childNode = ConvertTokenToHtml(doc, property.Value, childPath, sourceLanguage, referencedEntries);
+            var childNode = ConvertTokenToHtml(doc, property.Value, childPath, sourceLanguage, assetService, datasetId, referencedEntries);
             if (childNode != null)
             {
                 hasChildren = true;
@@ -210,7 +224,8 @@ public static class JsonToHtmlConverter
         return hasChildren ? container : null;
     }
 
-    private static HtmlNode? ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath, string sourceLanguage, Dictionary<string, JObject>? referencedEntries = null)
+    private static HtmlNode? ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath, string sourceLanguage, 
+        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null)
     {
         if (IsInternationalizedArray(arr))
         {
@@ -220,7 +235,7 @@ public static class JsonToHtmlConverter
 
             if (itemForSource != null)
             {
-                var itemNode = ConvertObjectToHtml(doc, itemForSource, currentPath, sourceLanguage, referencedEntries);
+                var itemNode = ConvertObjectToHtml(doc, itemForSource, currentPath, sourceLanguage, assetService, datasetId, referencedEntries);
                 if (itemNode != null)
                 {
                     return itemNode;
@@ -236,7 +251,7 @@ public static class JsonToHtmlConverter
         {
             var item = arr[i];
             string childPath = $"{currentPath}[{i}]";
-            var childNode = ConvertTokenToHtml(doc, item, childPath, sourceLanguage, referencedEntries);
+            var childNode = ConvertTokenToHtml(doc, item, childPath, sourceLanguage, assetService, datasetId, referencedEntries);
             if (childNode != null)
             {
                 hasChildren = true;
