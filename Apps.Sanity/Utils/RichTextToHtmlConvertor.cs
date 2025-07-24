@@ -100,6 +100,7 @@ public static class RichTextToHtmlConvertor
     private static void AppendSpanContent(JObject span, HtmlNode parentNode, HtmlDocument doc, JArray? markDefs)
     {
         var text = span["text"]?.ToString() ?? "";
+        text = text.Replace("\n", "<br/>");
         var marks = span["marks"] as JArray;
 
         if (string.IsNullOrEmpty(text))
