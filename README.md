@@ -102,6 +102,14 @@ plugins: [
 ]
 ```
 
+## Demo video
+
+Sanity CMS Translation Automation with Blackbird.io
+
+import { YouTube } from '@astro-community/astro-embed-youtube';
+
+<YouTube id="https://youtu.be/oTtTSK3SJTA" />
+
 ## Feedback
 
 Do you want to use this app or do you have feedback on our implementation? Reach out to us using the [established channels](https://www.blackbird.io/) or create an issue.
