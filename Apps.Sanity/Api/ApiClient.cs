@@ -5,8 +5,7 @@ using RestSharp;
 
 namespace Apps.Sanity.Api;
 
-public class ApiClient(IEnumerable<AuthenticationCredentialsProvider> authenticationCredentialsProviders)
-    : BlackBirdRestClient(new()
+public class ApiClient(IEnumerable<AuthenticationCredentialsProvider> authenticationCredentialsProviders) : BlackBirdRestClient(new()
     {
         BaseUrl = authenticationCredentialsProviders.BuildUri(),
         ThrowOnAnyError = false
