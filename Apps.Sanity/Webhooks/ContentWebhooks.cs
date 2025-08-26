@@ -7,7 +7,7 @@ using Blackbird.Applications.SDK.Blueprints;
 using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.Sdk.Common.Webhooks;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Blackbird.Applications.Sdk.Common.Exceptions;
 
 namespace Apps.Sanity.Webhooks;
 
@@ -27,13 +27,16 @@ public class ContentWebhooks(InvocationContext invocationContext) : AppInvocable
 
     private Task<WebhookResponse<ContentResponse>> HandleWebhookRequest(WebhookRequest request, WebhookFilterRequest filterRequest)
     {
-        var body = request.Body.ToString()!;
-        var content = JsonConvert.DeserializeObject<ContentResponse>(body)
-                      ?? throw new Exception($"Cannot deserialize body to a content object. Body: {body}");
+        if (string.IsNullOrEmpty(filterRequest.CustomHeaderName) != string.IsNullOrEmpty(filterRequest.CustomHeaderValue))
+            throw new PluginMisconfigurationException("Both 'Custom header name' and 'Custom header value' must be either provided together or omitted.");
 
-        if (filterRequest.Types != null)
+        if (!string.IsNullOrEmpty(filterRequest.CustomHeaderName))
         {
-            if (!filterRequest.Types.Contains(content.Type))
+            var headerValue = string.Empty;
+            request.Headers?.TryGetValue(filterRequest.CustomHeaderName, out headerValue);
+            var headerValueContains = headerValue?.Contains(filterRequest.CustomHeaderValue!, StringComparison.OrdinalIgnoreCase);
+
+            if (headerValueContains != true)
             {
                 return Task.Run(() => new WebhookResponse<ContentResponse>
                 {
@@ -41,6 +44,26 @@ public class ContentWebhooks(InvocationContext invocationContext) : AppInvocable
                     Result = null
                 });
             }
+        }
+
+        var body = request.Body.ToString()!;
+        var content = JsonConvert.DeserializeObject<ContentResponse>(body)
+                      ?? throw new Exception($"Cannot deserialize body to a content object. Body: {body}");
+
+        if (filterRequest.CustomHeaderName != null &&
+            request.Headers?.TryGetValue(filterRequest.CustomHeaderName, out var receivedHeaderValue) == true)
+        {
+            content.CustomHeaderValue = receivedHeaderValue ?? string.Empty;
+        }
+
+        if (filterRequest.Types != null &&
+            filterRequest.Types.Contains(content.Type) != true)
+        {
+            return Task.Run(() => new WebhookResponse<ContentResponse>
+            {
+                ReceivedWebhookRequestType = WebhookRequestType.Preflight,
+                Result = null
+            });
         }
 
         if (!string.IsNullOrEmpty(filterRequest.TranslationLanguage) &&

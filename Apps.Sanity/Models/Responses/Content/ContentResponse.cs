@@ -17,4 +17,7 @@ public class ContentResponse : IDownloadContentInput
     
     [Display("Updated at"), JsonProperty("_updatedAt")]
     public DateTime UpdatedAt { get; set; }
+
+    [Display("Custom header value"), JsonIgnore]
+    public string CustomHeaderValue { get; set; } = string.Empty;
 }
