@@ -32,6 +32,9 @@ public class ContentWebhooks(InvocationContext invocationContext) : AppInvocable
 
         if (!string.IsNullOrEmpty(filterRequest.CustomHeaderName))
         {
+            if (!filterRequest.CustomHeaderName.StartsWith("blackbird"))
+                throw new PluginMisconfigurationException("Custom header name must start with 'blackbird'.");
+
             var headerValue = string.Empty;
             request.Headers?.TryGetValue(filterRequest.CustomHeaderName, out headerValue);
             var headerValueContains = headerValue?.Contains(filterRequest.CustomHeaderValue!, StringComparison.OrdinalIgnoreCase);

@@ -7,7 +7,7 @@ public class WebhookFilterRequest
     [Display("Content types")] 
     public IEnumerable<string>? Types { get; set; }
 
-    [Display("Custom header name")]
+    [Display("Custom header name (start with 'blackbird')")]
     public string? CustomHeaderName { get; set; }
 
     [Display("Custom header value")]

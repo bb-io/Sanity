@@ -35,7 +35,7 @@ public class ContentWebhooksTests : TestBase
     public async Task OnContentUpdated_WithCustomHeader_StartsFlight()
     {
         // Arrange
-        var customHeaderName = "x-custom-header";
+        var customHeaderName = "blackbird-custom-header";
         var customHeaderValue = "my-custom-value";
 
         var request = new WebhookRequest
