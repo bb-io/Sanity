@@ -1,0 +1,388 @@
+{
+  "name": "Checkpoints how-to",
+  "_createdAt": "2025-07-08T11:43:22Z",
+  "_updatedAt": "2025-08-27T10:24:25Z",
+  "_rev": "3bb0f4a1-a816-4132-923d-49f0d6fabe39",
+  "heading": [
+    {
+      "_key": "en",
+      "_type": "internationalizedArrayStringValue",
+      "value": "How do I add a Checkpoint to my Bird?"
+    },
+    {
+      "_key": "fr",
+      "_type": "internationalizedArrayStringValue",
+      "value": "Comment ajouter un point de contrôle à mon oiseau ?"
+    },
+    {
+      "_key": "de",
+      "_type": "internationalizedArrayStringValue",
+      "value": "Wie füge ich einen Checkpoint zu meinem Vogel hinzu?"
+    }
+  ],
+  "_type": "snippet",
+  "_system": {
+    "base": {
+      "id": "28f82704-cf5c-4b34-81eb-f0b192cab37d",
+      "rev": "PyaEvmv6SP4ia4niskDsLs"
+    }
+  },
+  "tags": [
+    {
+      "_key": "150f857253ac",
+      "_type": "reference",
+      "_ref": "fae008bc-aba2-4923-a8e9-ab3b83338d1a"
+    }
+  ],
+  "_id": "drafts.28f82704-cf5c-4b34-81eb-f0b192cab37d",
+  "contentMultilingual": [
+    {
+      "_key": "en",
+      "_type": "internationalizedArrayBlockArrayValue",
+      "value": [
+        {
+          "_key": "d86ba93c2fe5",
+          "_type": "image",
+          "asset": {
+            "_ref": "image-ea50098f581780290b19e87c86ba0c416b2b3165-1280x806-webp",
+            "_type": "reference"
+          }
+        },
+        {
+          "_key": "5b5f9105cad5",
+          "_type": "block",
+          "style": "normal",
+          "children": [
+            {
+              "marks": [],
+              "_key": "080f081d4f7f",
+              "text": "Click on the plus sign as you would to add any other step and select ",
+              "_type": "span"
+            },
+            {
+              "_key": "f68cdd43cd50",
+              "text": "Checkpoint",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "_key": "4ab04dc6f8bc",
+              "text": ". Choose between waiting for an ",
+              "_type": "span",
+              "marks": []
+            },
+            {
+              "_key": "9e9df5bcf56d",
+              "text": "Event",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "_key": "3076a6e7bfdb",
+              "text": " in an app to happen or a specific amount of time (",
+              "_type": "span",
+              "marks": []
+            },
+            {
+              "_key": "6eea23100deb",
+              "text": "Delay",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "marks": [],
+              "_key": "5600c48535e2",
+              "text": ").",
+              "_type": "span"
+            }
+          ],
+          "markDefs": []
+        },
+        {
+          "children": [
+            {
+              "marks": [],
+              "_key": "910158203fbb",
+              "text": "If you’ve chosen to wait for an event, you need to click continue or go to the ",
+              "_type": "span"
+            },
+            {
+              "_key": "d34020ba61de",
+              "text": "Connection",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "_key": "fe05b77c6320",
+              "text": " tab, then select the app, the type of event, your connection and the ID for the exact object to monitor — if you are awaiting a project to be completed, you can specify the project ID so your Flight only continues once this specific project is completed.",
+              "_type": "span",
+              "marks": []
+            }
+          ],
+          "markDefs": [],
+          "_key": "b9dd37a31c6a",
+          "_type": "block",
+          "style": "normal"
+        },
+        {
+          "_key": "bda8ac4d4827",
+          "_type": "block",
+          "style": "normal",
+          "children": [
+            {
+              "text": "If the Delay option was selected instead, you need to specify the amount of time to wait in the ",
+              "_type": "span",
+              "marks": [],
+              "_key": "ee8e7d0075e7"
+            },
+            {
+              "_key": "b57e11bec50b",
+              "text": "Duration",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "_key": "c5783820ec7d",
+              "text": " tab.",
+              "_type": "span",
+              "marks": []
+            }
+          ],
+          "markDefs": []
+        }
+      ]
+    },
+    {
+      "_key": "fr",
+      "_type": "internationalizedArrayBlockArrayValue",
+      "value": [
+        {
+          "_key": "d86ba93c2fe5",
+          "_type": "image",
+          "asset": {
+            "_ref": "image-ea50098f581780290b19e87c86ba0c416b2b3165-1280x806-webp",
+            "_type": "reference"
+          }
+        },
+        {
+          "_key": "5b5f9105cad5",
+          "_type": "block",
+          "style": "normal",
+          "children": [
+            {
+              "_key": "o4kqpdaiqu5o",
+              "text": "Cliquez sur le signe plus comme pour ajouter n'importe quelle autre étape et sélectionnez ",
+              "_type": "span",
+              "marks": []
+            },
+            {
+              "_key": "9ac6tpjv9dxu",
+              "text": " Point de contrôle ",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "_type": "span",
+              "marks": [],
+              "_key": "ug8g1u5zz5o5",
+              "text": ". Choisissez entre attendre qu'un "
+            },
+            {
+              "_key": "sfwne6ld23e4",
+              "text": " Événement ",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "marks": [],
+              "_key": "4v1jvf4mmron",
+              "text": " se produise dans une application ou un délai spécifique ( ",
+              "_type": "span"
+            },
+            {
+              "marks": [ "code" ],
+              "_key": "3ckvdhwv0h8o",
+              "text": " Délai ",
+              "_type": "span"
+            },
+            {
+              "marks": [],
+              "_key": "qcs307kc31py",
+              "text": " ).",
+              "_type": "span"
+            }
+          ],
+          "markDefs": []
+        },
+        {
+          "style": "normal",
+          "children": [
+            {
+              "_type": "span",
+              "marks": [],
+              "_key": "cj8ffdtr2sx4",
+              "text": "Si vous avez choisi d'attendre un événement, vous devez cliquer sur Continuer ou accéder à l'onglet "
+            },
+            {
+              "text": " Connexion ",
+              "_type": "span",
+              "marks": [ "code" ],
+              "_key": "hflwwceunbkx"
+            },
+            {
+              "_type": "span",
+              "marks": [],
+              "_key": "m0fwtjjpnvrq",
+              "text": ", puis sélectionner l'application, le type d'événement, votre connexion et l'ID de l'objet exact à surveiller. Si vous attendez qu'un projet soit terminé, vous pouvez spécifier l'ID du projet afin que votre vol ne continue qu'une fois ce projet spécifique terminé."
+            }
+          ],
+          "markDefs": [],
+          "_key": "b9dd37a31c6a",
+          "_type": "block"
+        },
+        {
+          "style": "normal",
+          "children": [
+            {
+              "_key": "enxu9bpscu8t",
+              "text": "Si l'option Délai a été sélectionnée, vous devez spécifier la durée d'attente dans l'onglet ",
+              "_type": "span",
+              "marks": []
+            },
+            {
+              "_key": "chkk5cmst5df",
+              "text": " Durée ",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "text": ".",
+              "_type": "span",
+              "marks": [],
+              "_key": "7odhiacdmo5b"
+            }
+          ],
+          "markDefs": [],
+          "_key": "bda8ac4d4827",
+          "_type": "block"
+        }
+      ]
+    },
+    {
+      "_key": "de",
+      "_type": "internationalizedArrayBlockArrayValue",
+      "value": [
+        {
+          "_key": "d86ba93c2fe5",
+          "_type": "image",
+          "asset": {
+            "_ref": "image-ea50098f581780290b19e87c86ba0c416b2b3165-1280x806-webp",
+            "_type": "reference"
+          }
+        },
+        {
+          "markDefs": [],
+          "_key": "5b5f9105cad5",
+          "_type": "block",
+          "style": "normal",
+          "children": [
+            {
+              "_key": "fxdbbeh7tndi",
+              "text": "Klicken Sie wie bei jedem anderen Schritt auf das Pluszeichen und wählen Sie ",
+              "_type": "span",
+              "marks": []
+            },
+            {
+              "_key": "4g1wvw6yi9xb",
+              "text": "Checkpoint",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "_type": "span",
+              "marks": [],
+              "_key": "n6qla8e76u55",
+              "text": ". Wählen Sie zwischen dem Warten auf ein "
+            },
+            {
+              "_key": "h9xuhw8wzeaf",
+              "text": "Ereignis",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "text": " in einer App oder einer bestimmten Zeitspanne",
+              "_type": "span",
+              "marks": [],
+              "_key": "8tznotp71m75"
+            },
+            {
+              "_key": "2ecsbhtd5xmm",
+              "text": "(Verzögerung",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "marks": [],
+              "_key": "6mht6ug0205c",
+              "text": ").",
+              "_type": "span"
+            }
+          ]
+        },
+        {
+          "markDefs": [],
+          "_key": "b9dd37a31c6a",
+          "_type": "block",
+          "style": "normal",
+          "children": [
+            {
+              "_key": "f1o06qssl21d",
+              "text": "Wenn Sie sich dafür entschieden haben, auf ein Ereignis zu warten, müssen Sie auf \"Weiter\" klicken oder auf die Registerkarte \" ",
+              "_type": "span",
+              "marks": []
+            },
+            {
+              "_key": "43cv6cpv7niw",
+              "text": "Verbindung\"",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "_key": "dgb6q9ggh39t",
+              "text": " gehen und dann die Anwendung, die Art des Ereignisses, Ihre Verbindung und die ID des genauen zu überwachenden Objekts auswählen - wenn Sie auf den Abschluss eines Projekts warten, können Sie die Projekt-ID angeben, damit Ihr Flug erst fortgesetzt wird, wenn dieses spezifische Projekt abgeschlossen ist.",
+              "_type": "span",
+              "marks": []
+            }
+          ]
+        },
+        {
+          "style": "normal",
+          "children": [
+            {
+              "_key": "xad9pqrx1q0j",
+              "text": "Wenn stattdessen die Option Verzögerung gewählt wurde, müssen Sie auf der Registerkarte ",
+              "_type": "span",
+              "marks": []
+            },
+            {
+              "_key": "55mooyd91h2f",
+              "text": "Dauer",
+              "_type": "span",
+              "marks": [ "code" ]
+            },
+            {
+              "_key": "rco4hs4nn75o",
+              "text": " die Wartezeit angeben.",
+              "_type": "span",
+              "marks": []
+            }
+          ],
+          "markDefs": [],
+          "_key": "bda8ac4d4827",
+          "_type": "block"
+        }
+      ]
+    }
+  ]
+}

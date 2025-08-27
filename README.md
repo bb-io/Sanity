@@ -85,6 +85,7 @@ To enable webhooks, go to your project page in Sanity.io. Select the **API** tab
 
 ## Limitations
 
+- The app works with the published content as of now. Please, contact us if you need support for working with document drafts.
 - In Sanity, localization is available through a plugin, which means the user will create their own content models by writing code (including locales). Since it's a plugin, it doesn't provide any API endpoints for directly retrieving locales or other information from the plugin.
 
 ```ts
