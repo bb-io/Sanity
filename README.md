@@ -83,8 +83,11 @@ To enable webhooks, go to your project page in Sanity.io. Select the **API** tab
 > 1. **Trigger if all language fields are not present**: When enabled, the event will only trigger if the specified "Translation language" is missing from the content.
 > 2. **Translation language**: Only applies if the first filter is enabled. Set the translation language you want to target. The event will trigger only if all localization fields for that language are absent from the content.
 
+You can direct which bird should start by setting custom webhook headers with names prefixed by `blackbird-` (such as `blackbird-filter: article`) and having your bird check for them on "Filter" tab.
+
 ## Limitations
 
+- The app works with the published content as of now. Please, contact us if you need support for working with document drafts.
 - In Sanity, localization is available through a plugin, which means the user will create their own content models by writing code (including locales). Since it's a plugin, it doesn't provide any API endpoints for directly retrieving locales or other information from the plugin.
 
 ```ts

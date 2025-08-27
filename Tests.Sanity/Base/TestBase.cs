@@ -19,6 +19,7 @@ public class TestBase
         };
 
         FileManager = new FileManager(folderLocation);
+        InputFolder = Path.Combine(folderLocation, "Input");
     }
 
     protected IEnumerable<AuthenticationCredentialsProvider> Creds { get; set; }
@@ -26,4 +27,11 @@ public class TestBase
     public InvocationContext InvocationContext { get; set; }
 
     public FileManager FileManager { get; set; }
+
+    protected string InputFolder;
+
+    public Task<string> ReadFileFromInput(string fileName)
+    {
+        return File.ReadAllTextAsync(Path.Combine(InputFolder, fileName));
+    }
 }

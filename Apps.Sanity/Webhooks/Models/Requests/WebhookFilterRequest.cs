@@ -7,6 +7,12 @@ public class WebhookFilterRequest
     [Display("Content types")] 
     public IEnumerable<string>? Types { get; set; }
 
+    [Display("Custom header name (start with 'blackbird')")]
+    public string? CustomHeaderName { get; set; }
+
+    [Display("Custom header value")]
+    public string? CustomHeaderValue { get; set; }
+
     [Display("Translation language", Description = "Only applies if 'Trigger if all language fields are not exists' is enabled")]
     public string? TranslationLanguage { get; set; }
 
