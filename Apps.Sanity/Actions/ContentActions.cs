@@ -24,7 +24,7 @@ using HtmlAgilityPack;
 
 namespace Apps.Sanity.Actions;
 
-[ActionList]
+[ActionList("Content")]
 public class ContentActions(InvocationContext invocationContext, IFileManagementClient fileManagementClient) : AppInvocable(invocationContext)
 {
     [Action("Search content",
