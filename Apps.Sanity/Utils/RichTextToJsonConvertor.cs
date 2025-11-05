@@ -65,9 +65,22 @@ public static class RichTextToJsonConvertor
         {
             foreach (var item in array)
             {
-                if (item is JObject obj && obj["_key"]?.ToString() == sourceLanguage)
+                if (item is JObject obj && obj["_key"]?.ToString()?.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    return obj["_type"]?.ToString() ?? "internationalizedArrayBlockContent";
+                    if (obj["value"] is JArray valueArray && valueArray.Count > 0)
+                    {
+                        var firstElement = valueArray[0] as JObject;
+                        if (firstElement != null)
+                        {
+                            var objType = obj["_type"]?.ToString();
+                            return objType ?? "internationalizedArrayBlockContent";
+                        }
+                    }
+                    else
+                    {
+                        var objType = obj["_type"]?.ToString();
+                        return objType ?? "internationalizedArrayBlockContent";
+                    }
                 }
             }
         }
