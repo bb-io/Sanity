@@ -82,7 +82,7 @@ public static class HtmlToJsonConvertor
             var newText = node.InnerText.Trim();
             if (string.IsNullOrEmpty(newText)) continue;
 
-            dataJsonPath = dataJsonPath.Replace($"[{sourceLanguage}]", $"[{targetLanguage}]");
+            dataJsonPath = dataJsonPath.Replace($"[{sourceLanguage}]", $"[{targetLanguage}]", StringComparison.OrdinalIgnoreCase);
             var parsedPathSegments = dataJsonPath.Split('.');
 
             var parentDiv = node.Ancestors("div").FirstOrDefault(d => d.Attributes["data-json-path"] != null);
