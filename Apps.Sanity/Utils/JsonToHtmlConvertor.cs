@@ -13,7 +13,7 @@ public static class JsonToHtmlConverter
         var doc = new HtmlDocument();
 
         var htmlNode = doc.CreateElement("html");
-        htmlNode.SetAttributeValue("lang", "en");
+        htmlNode.SetAttributeValue("lang", sourceLanguage);
         doc.DocumentNode.AppendChild(htmlNode);
 
         var headNode = doc.CreateElement("head");
