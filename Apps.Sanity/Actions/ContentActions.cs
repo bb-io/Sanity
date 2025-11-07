@@ -153,12 +153,22 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             }
         }
 
-        var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.Locale, referencedContents);
+        var publish = request.Publish ?? false;
+        var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.Locale, publish, referencedContents);
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
             {
                 mutations = allPatches
             });
+        
+        if(publish == false)
+        {
+            await EnsureDraftExistsAsync(request, contentId, publishedContent: mainContent);
+            foreach (var referencedContent in referencedContents)
+            {
+                await EnsureDraftExistsAsync(request, referencedContent.Key, publishedContent: referencedContent.Value);
+            }
+        }
 
         var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
         if (string.IsNullOrEmpty(transaction.TransactionId))
@@ -253,10 +263,56 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         return result;
     }
     
+    private async Task EnsureDraftExistsAsync(DatasetIdentifier datasetIdentifier, string contentId, JObject publishedContent)
+    {
+        var groqQuery = $"_id == \"drafts.{contentId}\"";
+        var draftContent = await SearchContentAsync(new()
+        {
+            DatasetId = datasetIdentifier.ToString(),
+            GroqQuery = groqQuery,
+            ReturnDrafts = true
+        });
+
+        if (draftContent.TotalCount == 0)
+        {
+            var createMutation = new Dictionary<string, object>
+            {
+                { "_id", $"drafts.{contentId}" }
+            };
+
+            foreach (var property in publishedContent.Properties())
+            {
+                if (property.Name != "_id")
+                {
+                    createMutation.Add(property.Name, property.Value);
+                }
+            }
+
+            var apiRequest = new ApiRequest($"/data/mutate/{datasetIdentifier}", Method.Post, Creds)
+                .WithJsonBody(new
+                {
+                    mutations = new object[]
+                    {
+                        new
+                        {
+                            create = createMutation
+                        }
+                    }
+                });
+
+            await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
+        }
+    }
+    
     private async Task<List<T>> SearchContentInternalAsync<T>(SearchContentRequest identifier)
     {
         var endpoint = $"/data/query/{identifier}{identifier.BuildGroqQuery()} | order(_createdAt desc)";
         var request = new ApiRequest(endpoint, Method.Get, Creds);
+        if(identifier.ReturnDrafts == true)
+        {
+            request.AddParameter("perspective", "raw");
+        }
+        
         var content = await Client.ExecuteWithErrorHandling<BaseSearchDto<T>>(request);
         return content.Result;
     }
