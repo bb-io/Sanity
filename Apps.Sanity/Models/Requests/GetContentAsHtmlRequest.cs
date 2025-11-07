@@ -17,4 +17,7 @@ public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
     
     [Display("Order of fields", Description = "The order in which the fields should be rendered in the HTML output. If not specified, the order will be determined by the schema.")]
     public IEnumerable<string>? OrderOfFields { get; set; }
+    
+    [Display("Reference field names", Description = "Reference field names by default should be called 'reference' but if your schema uses different names for reference fields, you can specify them here. Please note that 'reference' is always included even if not specified here.")]
+    public IEnumerable<string>? ReferenceFieldNames { get; set; }
 }

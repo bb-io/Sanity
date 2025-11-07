@@ -78,12 +78,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var referencedEntries = new Dictionary<string, JObject>();
         if (getContentAsHtmlRequest.IncludeReferenceEntries == true || getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true)
         {
+            var referenceFieldNames = getContentAsHtmlRequest.ReferenceFieldNames?.ToList() ?? new List<string>();
             await CollectReferencesRecursivelyAsync(
                 content,
                 getContentAsHtmlRequest.DatasetId,
                 getContentAsHtmlRequest.IncludeReferenceEntries == true,
                 getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true,
-                referencedEntries
+                referencedEntries,
+                referenceFieldNames
             );
         }
 
@@ -322,10 +324,11 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         string? datasetId,
         bool includeReferenceEntries,
         bool includeRichTextReferenceEntries,
-        Dictionary<string, JObject> referencedEntries)
+        Dictionary<string, JObject> referencedEntries,
+        IEnumerable<string> referenceFieldNames)
     {
         var referenceIds = new List<string>();
-        CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds);
+        CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds, referenceFieldNames: referenceFieldNames);
         referenceIds = referenceIds.Where(id => !referencedEntries.ContainsKey(id)).ToList();
 
         if (!referenceIds.Any())
@@ -352,7 +355,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                     datasetId,
                     includeReferenceEntries,
                     includeRichTextReferenceEntries,
-                    referencedEntries);
+                    referencedEntries,
+                    referenceFieldNames);
             }
         }
     }
@@ -362,11 +366,13 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         bool includeReferenceEntries,
         bool includeRichTextReferenceEntries,
         List<string> referenceIds,
+        IEnumerable<string> referenceFieldNames,
         string? parentPropertyName = null)
     {
         if (token is JObject obj)
         {
-            if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
+            var isReferenceField = parentPropertyName != null && referenceFieldNames.Contains(obj["_type"]?.ToString());
+            if ((obj["_type"]?.ToString() == "reference" || isReferenceField) && obj["_ref"] != null)
             {
                 if(obj["_ref"]?.ToString().Contains("image") == true)
                 {
@@ -389,7 +395,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             foreach (var prop in obj.Properties())
             {
                 CollectReferenceIds(prop.Value, includeReferenceEntries, includeRichTextReferenceEntries,
-                                   referenceIds, prop.Name);
+                                   referenceIds, referenceFieldNames, prop.Name);
             }
         }
         else if (token is JArray array)
@@ -397,7 +403,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             foreach (var item in array)
             {
                 CollectReferenceIds(item, includeReferenceEntries, includeRichTextReferenceEntries,
-                                   referenceIds, parentPropertyName);
+                                   referenceIds, referenceFieldNames, parentPropertyName);
             }
         }
     }
