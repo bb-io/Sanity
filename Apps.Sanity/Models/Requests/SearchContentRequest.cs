@@ -1,6 +1,7 @@
 ﻿using Apps.Sanity.Models.Identifiers;
 using Apps.Sanity.Utils;
 using Blackbird.Applications.Sdk.Common;
+using Blackbird.Applications.Sdk.Common.Dictionaries;
 
 namespace Apps.Sanity.Models.Requests;
 
@@ -19,6 +20,9 @@ public class SearchContentRequest : DatasetIdentifier
         Description =
             "Overrides all other optional parameters and allows you to manually specify filter parameters in GROQ format. You should provide a query like this: `_type==\"event\" && Name in [\"First name\"]`. For more information, see: https://www.sanity.io/docs/query-cheat-sheet.")]
     public string? GroqQuery { get; set; }
+
+    [Display("Return drafts")]
+    public bool? ReturnDrafts { get; set; }
 
     public string BuildGroqQuery()
     {

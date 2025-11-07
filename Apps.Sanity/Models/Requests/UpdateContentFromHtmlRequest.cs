@@ -16,4 +16,7 @@ public class UpdateContentFromHtmlRequest : DatasetIdentifier, IUploadContentInp
     
     [Display("Content ID"), DataSource(typeof(ContentDataHandler))]
     public string? ContentId { get; set; }
+    
+    [Display("Publish after update")]
+    public bool? Publish { get; set; }
 }

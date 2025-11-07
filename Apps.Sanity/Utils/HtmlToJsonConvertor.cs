@@ -1,11 +1,12 @@
-﻿using HtmlAgilityPack;
+﻿using Apps.Sanity.Models.Requests;
+using HtmlAgilityPack;
 using Newtonsoft.Json.Linq;
 
 namespace Apps.Sanity.Utils;
 
 public static class HtmlToJsonConvertor
 {
-    public static List<JObject> ToJsonPatches(string html, JObject mainContent, string targetLanguage, 
+    public static List<JObject> ToJsonPatches(string html, JObject mainContent, string targetLanguage, bool publish,
         Dictionary<string, JObject>? referencedContents = null)
     {
         var mainContentId = HtmlHelper.ExtractContentId(html);
@@ -17,7 +18,7 @@ public static class HtmlToJsonConvertor
         var htmlNode = doc.DocumentNode.SelectSingleNode("//html");
         var sourceLanguage = htmlNode?.GetAttributeValue("lang", "unknown")!;
         
-        ProcessContentDiv(doc, mainContentId, mainContent, sourceLanguage, targetLanguage, patches);
+        ProcessContentDiv(doc, mainContentId, mainContent, sourceLanguage, targetLanguage, patches, publish: publish);
         if (referencedContents != null && referencedContents.Any())
         {
             var refsContainer = doc.DocumentNode.SelectSingleNode("//div[@id='referenced-entries']");
@@ -32,7 +33,7 @@ public static class HtmlToJsonConvertor
                         if (string.IsNullOrEmpty(refId) || !referencedContents.TryGetValue(refId, out var refContent))
                             continue;
                             
-                        ProcessContentDiv(doc, refId, refContent, sourceLanguage, targetLanguage, patches, refDiv);
+                        ProcessContentDiv(doc, refId, refContent, sourceLanguage, targetLanguage, patches, publish: publish, refDiv);
                     }
                 }
             }
@@ -42,7 +43,7 @@ public static class HtmlToJsonConvertor
     }
     
     private static void ProcessContentDiv(HtmlDocument doc, string contentId, JObject contentObj, 
-        string sourceLanguage, string targetLanguage, List<JObject> patches, HtmlNode? contentRoot = null)
+        string sourceLanguage, string targetLanguage, List<JObject> patches, bool publish, HtmlNode? contentRoot = null)
     {
         contentRoot ??= doc.DocumentNode.SelectSingleNode($"//div[@data-content-id='{contentId}']");
         if (contentRoot == null) return;
@@ -96,11 +97,15 @@ public static class HtmlToJsonConvertor
             var jsonPropertyPath = BuildJsonPropertyPath(contentObj, parsedPathSegments, out var shouldInsertAfter);
             if (!groupedPatches.TryGetValue(parentPathKey, out var existingPatch))
             {
+                var id = publish
+                    ? contentId
+                    : $"drafts.{contentId}";
+                
                 existingPatch = new JObject
                 {
                     ["patch"] = new JObject
                     {
-                        ["id"] = contentId
+                        ["id"] = id
                     }
                 };
                 groupedPatches[parentPathKey] = existingPatch;
@@ -237,7 +242,7 @@ public static class HtmlToJsonConvertor
                         for (int k = 0; k < arr.Count; k++)
                         {
                             var itemObj = arr[k] as JObject;
-                            if (itemObj?["_key"]?.ToString() == lang)
+                            if (itemObj?["_key"]?.ToString().Equals(lang, StringComparison.OrdinalIgnoreCase) == true)
                             {
                                 idx = k;
                                 break;
