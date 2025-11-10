@@ -76,15 +76,16 @@ public class ContentActionsTests : TestBase
     [TestMethod]
     public async Task GetContentAsHtml_ExistingContent_ShouldNotThrowError()
     {
-        var contentId = "71a12136-6b14-4a77-bece-bd82fde801cf";
+        var contentId = "cc2cab03-88d1-4fec-a6e4-01536b642f92";
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content =
             await datasetDataHandler.GetContentAsHtmlAsync(new()
             {
-                ContentId = contentId, SourceLanguage = "en", 
-                IncludeReferenceEntries = false,
-                IncludeRichTextReferenceEntries = false,
-                OrderOfFields = new []{"title", "slug", "contentMultilingual"}
+                ContentId = contentId, 
+                SourceLanguage = "EN", 
+                IncludeReferenceEntries = true,
+                IncludeRichTextReferenceEntries = true,
+                ReferenceFieldNames = ["snippet-ref"]
             });
 
         content.Content.Name.Should().NotBeNullOrEmpty();
@@ -100,9 +101,10 @@ public class ContentActionsTests : TestBase
             Locale = "fr",
             Content = new()
             {
-                Name = "71a12136-6b14-4a77-bece-bd82fde801cf.html",
+                Name = "540031e3-2d54-433d-aea9-d110d270fdfb.html",
                 ContentType = "text/html"
-            }
+            },
+            Publish = false
         });
     }
 
@@ -142,6 +144,30 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         await Assert.ThrowsExceptionAsync<PluginMisconfigurationException>(async () =>
             await datasetDataHandler.DeleteContentAsync(new() { ContentId = contentId }));
+    }
+    
+    [TestMethod]
+    public async Task AddReferenceToContentAsync_ValidInput_ShouldNotThrowError()
+    {
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
+        await datasetDataHandler.AddReferenceToContentAsync(new()
+        {
+            ContentId = "cedad9bf-b99b-41b7-b5cd-0cf1b4a6be24",
+            ReferenceFieldName = "Artist",
+            ReferenceContentId = "522472d5-456a-46d5-a44d-f251036a5b17"
+        });
+    }
+    
+    [TestMethod]
+    public async Task RemoveReferenceFromContentAsync_ValidInput_ShouldNotThrowError()
+    {
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
+        await datasetDataHandler.RemoveReferenceFromContentAsync(new()
+        {
+            ContentId = "cedad9bf-b99b-41b7-b5cd-0cf1b4a6be24",
+            ReferenceFieldName = "Artist",
+            ReferenceContentId = "522472d5-456a-46d5-a44d-f251036a5b17"
+        });
     }
 
     private async Task VerifySearchContentAsync(SearchContentRequest request,
