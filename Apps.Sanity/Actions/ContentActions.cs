@@ -258,6 +258,196 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         await Client.ExecuteWithErrorHandling(request);
     }
 
+    [Action("Add reference to content",
+        Description = "Add a reference to another content object within a specific dataset.")]
+    public async Task AddReferenceToContentAsync([ActionParameter] AddReferenceRequest request)
+    {
+        var groqQuery = $"_id == \"{request.ContentId}\"";
+        var jObjects = await SearchContentAsJObjectAsync(new()
+        {
+            DatasetId = request.DatasetId,
+            GroqQuery = groqQuery
+        });
+
+        if (jObjects.Count == 0)
+        {
+            throw new PluginMisconfigurationException(
+                "No content found for the provided ID. Please verify that the ID is correct and try again.");
+        }
+
+        var content = jObjects.First();
+        var shouldUpdateAsDraft = request.ShouldUpdateAsDraft();
+        var contentId = shouldUpdateAsDraft ? $"drafts.{request.ContentId}" : request.ContentId;
+
+        if (shouldUpdateAsDraft)
+        {
+            await EnsureDraftExistsAsync(request, request.ContentId, publishedContent: content);
+        }
+
+        var referenceField = content[request.ReferenceFieldName];
+        JObject mutation;
+
+        if (referenceField is JArray)
+        {
+            mutation = new JObject
+            {
+                ["patch"] = new JObject
+                {
+                    ["id"] = contentId,
+                    ["insert"] = new JObject
+                    {
+                        ["after"] = $"{request.ReferenceFieldName}[-1]",
+                        ["items"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["_type"] = "reference",
+                                ["_ref"] = request.ReferenceContentId,
+                                ["_key"] = Guid.NewGuid().ToString().Replace("-", "").Substring(0, 12)
+                            }
+                        }
+                    }
+                }
+            };
+        }
+        else if (referenceField is JObject || referenceField == null)
+        {
+            mutation = new JObject
+            {
+                ["patch"] = new JObject
+                {
+                    ["id"] = contentId,
+                    ["set"] = new JObject
+                    {
+                        [request.ReferenceFieldName] = new JObject
+                        {
+                            ["_type"] = "reference",
+                            ["_ref"] = request.ReferenceContentId
+                        }
+                    }
+                }
+            };
+        }
+        else
+        {
+            throw new PluginMisconfigurationException(
+                $"Field '{request.ReferenceFieldName}' is not a valid reference field.");
+        }
+
+        var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
+            .WithJsonBody(new
+            {
+                mutations = new[] { mutation }
+            });
+
+        var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
+        if (string.IsNullOrEmpty(transaction.TransactionId))
+        {
+            throw new PluginApplicationException(
+                "An unexpected error occurred while adding the reference. Please contact support for further assistance.");
+        }
+    }
+
+    [Action("Remove reference from content",
+        Description = "Remove a reference to another content object within a specific dataset.")]
+    public async Task RemoveReferenceFromContentAsync([ActionParameter] RemoveReferenceRequest request)
+    {
+        var groqQuery = $"_id == \"{request.ContentId}\"";
+        var jObjects = await SearchContentAsJObjectAsync(new()
+        {
+            DatasetId = request.DatasetId,
+            GroqQuery = groqQuery
+        });
+
+        if (jObjects.Count == 0)
+        {
+            throw new PluginMisconfigurationException(
+                "No content found for the provided ID. Please verify that the ID is correct and try again.");
+        }
+
+        var content = jObjects.First();
+        var shouldUpdateAsDraft = request.ShouldUpdateAsDraft();
+        var contentId = shouldUpdateAsDraft ? $"drafts.{request.ContentId}" : request.ContentId;
+
+        if (shouldUpdateAsDraft)
+        {
+            await EnsureDraftExistsAsync(request, request.ContentId, publishedContent: content);
+        }
+
+        var referenceField = content[request.ReferenceFieldName];
+        JObject mutation;
+
+        if (referenceField is JArray referenceArray)
+        {
+            var indexToRemove = -1;
+            for (int i = 0; i < referenceArray.Count; i++)
+            {
+                var item = referenceArray[i] as JObject;
+                if (item?["_ref"]?.ToString() == request.ReferenceContentId)
+                {
+                    indexToRemove = i;
+                    break;
+                }
+            }
+
+            if (indexToRemove == -1)
+            {
+                throw new PluginMisconfigurationException(
+                    $"Reference to content '{request.ReferenceContentId}' not found in field '{request.ReferenceFieldName}'.");
+            }
+
+            mutation = new JObject
+            {
+                ["patch"] = new JObject
+                {
+                    ["id"] = contentId,
+                    ["unset"] = new JArray
+                    {
+                        $"{request.ReferenceFieldName}[{indexToRemove}]"
+                    }
+                }
+            };
+        }
+        else if (referenceField is JObject referenceObject)
+        {
+            if (referenceObject["_ref"]?.ToString() != request.ReferenceContentId)
+            {
+                throw new PluginMisconfigurationException(
+                    $"Field '{request.ReferenceFieldName}' does not reference content '{request.ReferenceContentId}'.");
+            }
+
+            mutation = new JObject
+            {
+                ["patch"] = new JObject
+                {
+                    ["id"] = contentId,
+                    ["unset"] = new JArray
+                    {
+                        request.ReferenceFieldName
+                    }
+                }
+            };
+        }
+        else
+        {
+            throw new PluginMisconfigurationException(
+                $"Field '{request.ReferenceFieldName}' not found or is not a reference field.");
+        }
+
+        var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
+            .WithJsonBody(new
+            {
+                mutations = new[] { mutation }
+            });
+
+        var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
+        if (string.IsNullOrEmpty(transaction.TransactionId))
+        {
+            throw new PluginApplicationException(
+                "An unexpected error occurred while removing the reference. Please contact support for further assistance.");
+        }
+    }
+
     public async Task<List<JObject>> SearchContentAsJObjectAsync(SearchContentRequest identifier)
     {
         var result = await SearchContentInternalAsync<JObject>(identifier);

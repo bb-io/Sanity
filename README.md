@@ -38,6 +38,8 @@ Before setting up the integration, ensure that you have access to a Sanity proje
 - **Upload content**: Update localizable content fields using an HTML file.
 - **Create content**: Create a content object based on its type and parameters.
 - **Delete content**: Remove a content object from a dataset using its content identifier.
+- **Add reference to content**: Add a reference to another content object within a specific dataset.
+- **Remove reference from content**: Remove a reference to another content object within a specific dataset.
 
 ## HTML conversion
 
