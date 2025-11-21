@@ -1,6 +1,7 @@
 ﻿using Apps.Sanity.Actions;
 using Apps.Sanity.Api;
 using Apps.Sanity.Models.Responses;
+using Apps.Sanity.Utils;
 using Blackbird.Applications.Sdk.Common.Exceptions;
 using Blackbird.Applications.Sdk.Common.Invocation;
 
@@ -9,6 +10,7 @@ namespace Apps.Sanity.Services;
 public class AssetService(InvocationContext invocationContext)
 {
     private readonly ApiClient _apiClient = new(invocationContext.AuthenticationCredentialsProviders);
+    private readonly DraftContentHelper _draftHelper = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
     
     public async Task<string> GetAssetUrlAsync(string datasetId, string assetId)
     {
@@ -23,12 +25,9 @@ public class AssetService(InvocationContext invocationContext)
     
     private async Task<AssetResponse> GetContentAsync(string datasetId, string assetId)
     {
-        var contentActions = new ContentActions(invocationContext, null!);
-        var content = await contentActions.SearchContentAsJObjectAsync(new()
-        {
-            DatasetId = datasetId,
-            GroqQuery =  $"_id == \"{assetId}\""
-        });
+        var content = await _draftHelper.GetContentWithDraftFallbackAsync(
+            assetId,
+            datasetId);
 
         if (content.Count == 0)
         {

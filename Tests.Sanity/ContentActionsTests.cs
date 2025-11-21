@@ -65,7 +65,7 @@ public class ContentActionsTests : TestBase
     [TestMethod]
     public async Task GetContent_ExistingContent_ShouldNotThrowError()
     {
-        var contentId = "540031e3-2d54-433d-aea9-d110d270fdfb";
+        var contentId = "drafts.896c8360-d864-4435-bf69-7d0e29dae2bf";
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         var content = await datasetDataHandler.GetContentAsync(new() { ContentId = contentId });
 
