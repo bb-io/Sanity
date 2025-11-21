@@ -27,6 +27,7 @@ namespace Apps.Sanity.Actions;
 [ActionList("Content")]
 public class ContentActions(InvocationContext invocationContext, IFileManagementClient fileManagementClient) : AppInvocable(invocationContext)
 {
+    private readonly DraftContentHelper _draftHelper = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
     [Action("Search content",
         Description =
             "Search for content within a specific dataset. If no dataset is specified, the production dataset is used by default.")]
@@ -41,32 +42,26 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         Description = "Retrieve a content object from a specific dataset using a content identifier.")]
     public async Task<ContentResponse> GetContentAsync([ActionParameter] ContentIdentifier identifier)
     {
-        var groqQuery = $"_id == \"{identifier.ContentId}\"";
-        var content = await SearchContentAsync(new()
-        {
-            DatasetId = identifier.DatasetId,
-            GroqQuery = groqQuery
-        });
+        var result = await _draftHelper.GetContentWithDraftFallbackAsync(
+            identifier.ContentId,
+            identifier.DatasetId);
 
-        if (content.TotalCount == 0)
+        if (result.Count == 0)
         {
             throw new PluginMisconfigurationException(
                 "No content found for the provided ID. Please verify that the ID is correct and try again.");
         }
 
-        return content.Items.First();
+        return result.First().ToObject<ContentResponse>()!;
     }
 
     [Action("Download content", Description = "Get localizable content fields as HTML file")]
     [BlueprintActionDefinition(BlueprintAction.DownloadContent)]
     public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
     {
-        var groqQuery = $"_id == \"{getContentAsHtmlRequest.ContentId}\"";
-        var jObjects = await SearchContentAsJObjectAsync(new()
-        {
-            DatasetId = getContentAsHtmlRequest.DatasetId,
-            GroqQuery = groqQuery
-        });
+        var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
+            getContentAsHtmlRequest.ContentId,
+            getContentAsHtmlRequest.DatasetId);
 
         if (jObjects.Count == 0)
         {
@@ -121,19 +116,31 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
-        var jObjects = await SearchContentAsJObjectAsync(new()
-        {
-            DatasetId = request.DatasetId,
-            GroqQuery = $"_id == \"{contentId}\""
-        });
+        var publish = request.Publish ?? false;
+        var isDraftId = contentId.StartsWith("drafts.");
 
-        if (jObjects.Count == 0)
+        JObject mainContent;
+        if (!publish && isDraftId)
         {
-            throw new PluginMisconfigurationException(
-                "No content found for the provided ID. Please verify that the ID is correct and try again.");
+            // Ensure draft exists before updating
+            mainContent = await _draftHelper.EnsureDraftExistsForUpdateAsync(
+                contentId,
+                request);
         }
+        else
+        {
+            var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
+                contentId,
+                request.DatasetId);
 
-        var mainContent = jObjects.First();
+            if (jObjects.Count == 0)
+            {
+                throw new PluginMisconfigurationException(
+                    "No content found for the provided ID. Please verify that the ID is correct and try again.");
+            }
+
+            mainContent = jObjects.First();
+        }
         var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc);
         var referencedContents = new Dictionary<string, JObject>();
 
@@ -155,7 +162,6 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             }
         }
 
-        var publish = request.Publish ?? false;
         var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.Locale, publish, referencedContents);
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
@@ -165,10 +171,12 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         
         if(publish == false)
         {
-            await EnsureDraftExistsAsync(request, contentId, publishedContent: mainContent);
+            var publishedId = DraftContentHelper.GetPublishedId(contentId);
+            await EnsureDraftExistsAsync(request, publishedId, publishedContent: mainContent);
             foreach (var referencedContent in referencedContents)
             {
-                await EnsureDraftExistsAsync(request, referencedContent.Key, publishedContent: referencedContent.Value);
+                var refPublishedId = DraftContentHelper.GetPublishedId(referencedContent.Key);
+                await EnsureDraftExistsAsync(request, refPublishedId, publishedContent: referencedContent.Value);
             }
         }
 
@@ -262,24 +270,37 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         Description = "Add a reference to another content object within a specific dataset.")]
     public async Task AddReferenceToContentAsync([ActionParameter] AddReferenceRequest request)
     {
-        var groqQuery = $"_id == \"{request.ContentId}\"";
-        var jObjects = await SearchContentAsJObjectAsync(new()
+        var shouldUpdateAsDraft = request.ShouldUpdateAsDraft();
+        var isDraftId = request.ContentId.StartsWith("drafts.");
+        
+        JObject content;
+        if (shouldUpdateAsDraft && isDraftId)
         {
-            DatasetId = request.DatasetId,
-            GroqQuery = groqQuery
-        });
+            // Ensure draft exists before updating
+            content = await _draftHelper.EnsureDraftExistsForUpdateAsync(
+                request.ContentId,
+                request);
+        }
+        else
+        {
+            var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
+                request.ContentId,
+                request.DatasetId);
 
-        if (jObjects.Count == 0)
-        {
-            throw new PluginMisconfigurationException(
-                "No content found for the provided ID. Please verify that the ID is correct and try again.");
+            if (jObjects.Count == 0)
+            {
+                throw new PluginMisconfigurationException(
+                    "No content found for the provided ID. Please verify that the ID is correct and try again.");
+            }
+
+            content = jObjects.First();
         }
 
-        var content = jObjects.First();
-        var shouldUpdateAsDraft = request.ShouldUpdateAsDraft();
-        var contentId = shouldUpdateAsDraft ? $"drafts.{request.ContentId}" : request.ContentId;
+        var contentId = shouldUpdateAsDraft 
+            ? (isDraftId ? request.ContentId : $"drafts.{request.ContentId}")
+            : request.ContentId;
 
-        if (shouldUpdateAsDraft)
+        if (shouldUpdateAsDraft && !isDraftId)
         {
             await EnsureDraftExistsAsync(request, request.ContentId, publishedContent: content);
         }
@@ -352,24 +373,37 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         Description = "Remove a reference to another content object within a specific dataset.")]
     public async Task RemoveReferenceFromContentAsync([ActionParameter] RemoveReferenceRequest request)
     {
-        var groqQuery = $"_id == \"{request.ContentId}\"";
-        var jObjects = await SearchContentAsJObjectAsync(new()
+        var shouldUpdateAsDraft = request.ShouldUpdateAsDraft();
+        var isDraftId = request.ContentId.StartsWith("drafts.");
+        
+        JObject content;
+        if (shouldUpdateAsDraft && isDraftId)
         {
-            DatasetId = request.DatasetId,
-            GroqQuery = groqQuery
-        });
+            // Ensure draft exists before updating
+            content = await _draftHelper.EnsureDraftExistsForUpdateAsync(
+                request.ContentId,
+                request);
+        }
+        else
+        {
+            var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
+                request.ContentId,
+                request.DatasetId);
 
-        if (jObjects.Count == 0)
-        {
-            throw new PluginMisconfigurationException(
-                "No content found for the provided ID. Please verify that the ID is correct and try again.");
+            if (jObjects.Count == 0)
+            {
+                throw new PluginMisconfigurationException(
+                    "No content found for the provided ID. Please verify that the ID is correct and try again.");
+            }
+
+            content = jObjects.First();
         }
 
-        var content = jObjects.First();
-        var shouldUpdateAsDraft = request.ShouldUpdateAsDraft();
-        var contentId = shouldUpdateAsDraft ? $"drafts.{request.ContentId}" : request.ContentId;
+        var contentId = shouldUpdateAsDraft 
+            ? (isDraftId ? request.ContentId : $"drafts.{request.ContentId}")
+            : request.ContentId;
 
-        if (shouldUpdateAsDraft)
+        if (shouldUpdateAsDraft && !isDraftId)
         {
             await EnsureDraftExistsAsync(request, request.ContentId, publishedContent: content);
         }
@@ -452,6 +486,26 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     {
         var result = await SearchContentInternalAsync<JObject>(identifier);
         result = result.Where(x => !x["_type"]!.ToString().Contains("system")).ToList();
+        
+        // If searching for a single draft ID and nothing found, try the published version
+        if (result.Count == 0 && identifier.GroqQuery != null && identifier.GroqQuery.Contains("_id =="))
+        {
+            var idMatch = System.Text.RegularExpressions.Regex.Match(identifier.GroqQuery, @"_id == \""(drafts\.[^\""]+)\""");
+            if (idMatch.Success)
+            {
+                var draftId = idMatch.Groups[1].Value;
+                var publishedId = DraftContentHelper.GetPublishedId(draftId);
+                var newRequest = new SearchContentRequest
+                {
+                    DatasetId = identifier.DatasetId,
+                    GroqQuery = $"_id == \"{publishedId}\"",
+                    ReturnDrafts = false
+                };
+                result = await SearchContentInternalAsync<JObject>(newRequest);
+                result = result.Where(x => !x["_type"]!.ToString().Contains("system")).ToList();
+            }
+        }
+        
         return result;
     }
     
