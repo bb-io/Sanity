@@ -44,7 +44,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     {
         var result = await _draftHelper.GetContentWithDraftFallbackAsync(
             identifier.ContentId,
-            identifier.DatasetId);
+            identifier.GetDatasetIdOrDefault());
 
         if (result.Count == 0)
         {
@@ -61,7 +61,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     {
         var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
             getContentAsHtmlRequest.ContentId,
-            getContentAsHtmlRequest.DatasetId);
+            getContentAsHtmlRequest.GetDatasetIdOrDefault());
 
         if (jObjects.Count == 0)
         {
@@ -131,7 +131,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
                 contentId,
-                request.DatasetId);
+                request.GetDatasetIdOrDefault());
 
             if (jObjects.Count == 0)
             {
@@ -285,7 +285,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
                 request.ContentId,
-                request.DatasetId);
+                request.GetDatasetIdOrDefault());
 
             if (jObjects.Count == 0)
             {
@@ -388,7 +388,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
                 request.ContentId,
-                request.DatasetId);
+                request.GetDatasetIdOrDefault());
 
             if (jObjects.Count == 0)
             {
@@ -497,7 +497,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 var publishedId = DraftContentHelper.GetPublishedId(draftId);
                 var newRequest = new SearchContentRequest
                 {
-                    DatasetId = identifier.DatasetId,
+                    DatasetId = identifier.GetDatasetIdOrDefault(),
                     GroqQuery = $"_id == \"{publishedId}\"",
                     ReturnDrafts = false
                 };
@@ -514,7 +514,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var groqQuery = $"_id == \"drafts.{contentId}\"";
         var draftContent = await SearchContentAsync(new()
         {
-            DatasetId = datasetIdentifier.ToString(),
+            DatasetId = datasetIdentifier.GetDatasetIdOrDefault(),
             GroqQuery = groqQuery,
             ReturnDrafts = true
         });

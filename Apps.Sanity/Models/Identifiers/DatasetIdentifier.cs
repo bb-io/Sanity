@@ -13,4 +13,9 @@ public class DatasetIdentifier
     {
         return DatasetId ?? "production";
     }
+    
+    public string GetDatasetIdOrDefault()
+    {
+        return DatasetId ?? "production";
+    }
 }
