@@ -98,13 +98,13 @@ public class ContentActionsTests : TestBase
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
         await datasetDataHandler.UpdateContentFromHtmlAsync(new()
         {
-            Locale = "fr",
+            Locale = "en",
             Content = new()
             {
-                Name = "540031e3-2d54-433d-aea9-d110d270fdfb.html",
+                Name = "drafts.13cf55b0-c6c1-4602-b95c-54f54987b9b5.html",
                 ContentType = "text/html"
             },
-            Publish = false
+            //Publish = false
         });
     }
 

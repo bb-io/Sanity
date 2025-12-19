@@ -97,10 +97,10 @@ public static class HtmlToJsonConvertor
             var jsonPropertyPath = BuildJsonPropertyPath(contentObj, parsedPathSegments, out var shouldInsertAfter);
             if (!groupedPatches.TryGetValue(parentPathKey, out var existingPatch))
             {
-                var id = publish
-                    ? contentId
-                    : $"drafts.{contentId}";
-                
+                var id = publish ? 
+                    DraftContentHelper.GetPublishedId(contentId): 
+                    DraftContentHelper.GetDraftId(DraftContentHelper.GetPublishedId(contentId));
+
                 existingPatch = new JObject
                 {
                     ["patch"] = new JObject
