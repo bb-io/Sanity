@@ -38,8 +38,14 @@ public static class RichTextToHtmlConvertor
             case "image":
                 return ProcessImageBlock(block, doc, blockPath, assetService, datasetId);
             case "reference":
+            case "snippet-ref":
                 return ProcessReferenceBlock(block, doc, blockPath);
             default:
+                if (block["content"] is JArray contentArray)
+                {
+                    return ProcessCustomBlock(block, doc, blockPath, assetService, datasetId);
+                }
+                
                 var unknownNode = doc.CreateElement("div");
                 unknownNode.SetAttributeValue("data-block-path", blockPath);
                 unknownNode.SetAttributeValue("data-type", blockType ?? "unknown");
@@ -216,7 +222,9 @@ public static class RichTextToHtmlConvertor
         refNode.SetAttributeValue("translate", "no");
         refNode.SetAttributeValue("data-block-path", blockPath);
         refNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
-        refNode.SetAttributeValue("data-type", "reference");
+        
+        var blockType = block["_type"]?.ToString() ?? "reference";
+        refNode.SetAttributeValue("data-type", blockType);
 
         var refId = block["_ref"]?.ToString();
         if (!string.IsNullOrEmpty(refId))
@@ -225,5 +233,35 @@ public static class RichTextToHtmlConvertor
         }
 
         return refNode;
+    }
+
+    private static HtmlNode ProcessCustomBlock(JObject block, HtmlDocument doc, string blockPath, AssetService assetService, string datasetId)
+    {
+        var customNode = doc.CreateElement("div");
+        customNode.SetAttributeValue("data-block-path", blockPath);
+        customNode.SetAttributeValue("data-type", block["_type"]?.ToString() ?? "custom");
+        customNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
+        
+        var blockCopy = (JObject)block.DeepClone();
+        blockCopy.Remove("content");
+        customNode.SetAttributeValue("data-original-block", blockCopy.ToString(Newtonsoft.Json.Formatting.None));
+        
+        var contentArray = block["content"] as JArray;
+        if (contentArray != null)
+        {
+            foreach (var contentBlock in contentArray)
+            {
+                if (contentBlock is JObject contentBlockObj)
+                {
+                    var childNode = ProcessBlock(contentBlockObj, doc, blockPath + ".content", assetService, datasetId);
+                    if (childNode != null)
+                    {
+                        customNode.AppendChild(childNode);
+                    }
+                }
+            }
+        }
+        
+        return customNode;
     }
 }

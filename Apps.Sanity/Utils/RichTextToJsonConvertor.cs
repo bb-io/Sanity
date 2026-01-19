@@ -180,11 +180,19 @@ public static class RichTextToJsonConvertor
         {
             return ProcessImageToBlock(node);
         }
-        else if (node.Name == "div" && node.GetAttributeValue("data-type", "") == "reference")
+        else if (node.Name == "div")
         {
-            return ProcessReferenceToBlock(node);
+            var dataType = node.GetAttributeValue("data-type", "");
+            if (dataType == "reference" || dataType == "snippet-ref")
+            {
+                return ProcessReferenceToBlock(node);
+            }
+            else if (!string.IsNullOrEmpty(dataType) && node.GetAttributeValue("data-original-block", "") != "")
+            {
+                return ProcessCustomBlockToBlock(node);
+            }
         }
-        
+
         return ProcessTextToBlock(node);
     }
     
@@ -192,7 +200,6 @@ public static class RichTextToJsonConvertor
     {
         var block = new JObject();
         var blockKey = listItemNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
-        
         block["_key"] = blockKey;
         block["_type"] = "block";
         
@@ -249,9 +256,10 @@ public static class RichTextToJsonConvertor
         var block = new JObject();
         var blockKey = refNode.GetAttributeValue("data-block-key", Guid.NewGuid().ToString("N"));
         var refId = refNode.GetAttributeValue("data-ref-id", "");
+        var blockType = refNode.GetAttributeValue("data-type", "reference");
         
         block["_key"] = blockKey;
-        block["_type"] = "reference";
+        block["_type"] = blockType;
         if (!string.IsNullOrEmpty(refId))
         {
             block["_ref"] = refId;
@@ -577,5 +585,28 @@ public static class RichTextToJsonConvertor
         };
         
         return span;
+    }
+    
+    private static JObject ProcessCustomBlockToBlock(HtmlNode customNode)
+    {
+        var originalBlockJson = customNode.GetAttributeValue("data-original-block", "");
+        var decodedJson = System.Net.WebUtility.HtmlDecode(originalBlockJson);
+        var customBlock = JObject.Parse(decodedJson);
+        
+        var contentArray = new JArray();
+        foreach (var childNode in customNode.ChildNodes)
+        {
+            if (childNode.NodeType == HtmlNodeType.Element)
+            {
+                var childBlock = ConvertHtmlElementToBlock(childNode);
+                if (childBlock != null)
+                {
+                    contentArray.Add(childBlock);
+                }
+            }
+        }
+        
+        customBlock["content"] = contentArray;
+        return customBlock;
     }
 }
