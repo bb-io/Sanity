@@ -1,4 +1,6 @@
-﻿using Apps.Sanity.Services;
+﻿using Apps.Sanity.Models;
+using Apps.Sanity.Services;
+using Blackbird.Filters.Shared;
 using HtmlAgilityPack;
 using Newtonsoft.Json.Linq;
 
@@ -8,7 +10,7 @@ public static class JsonToHtmlConverter
 {
     public static string ToHtml(this JObject jObject, string contentId, string sourceLanguage, 
         AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null, 
-        IEnumerable<string>? orderOfFields = null)
+        IEnumerable<string>? orderOfFields = null, List<FieldSizeRestriction>? fieldRestrictions = null)
     {
         var doc = new HtmlDocument();
 
@@ -51,7 +53,7 @@ public static class JsonToHtmlConverter
                 continue;
             }
 
-            var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage, assetService, datasetId, referencedEntries);
+            var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
             if (convertedNode != null)
             {
                 mainContentDiv.AppendChild(convertedNode);
@@ -92,7 +94,7 @@ public static class JsonToHtmlConverter
                         continue;
                     }
 
-                    var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage, assetService, datasetId);
+                    var convertedNode = ConvertTokenToHtml(doc, propValue, propName, sourceLanguage, assetService, datasetId, null, fieldRestrictions);
                     if (convertedNode != null)
                     {
                         refDiv.AppendChild(convertedNode);
@@ -117,7 +119,7 @@ public static class JsonToHtmlConverter
     }
 
     private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath, string sourceLanguage,
-        AssetService assetService, string datasetId,  Dictionary<string, JObject>? referencedEntries = null)
+        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null, List<FieldSizeRestriction>? fieldRestrictions = null)
     {
         if (token is JObject obj)
         {
@@ -131,11 +133,11 @@ public static class JsonToHtmlConverter
                 return referenceDiv;
             }
             
-            return ConvertObjectToHtml(doc, obj, currentPath, sourceLanguage, assetService, datasetId, referencedEntries);
+            return ConvertObjectToHtml(doc, obj, currentPath, sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
         }
         else if (token is JArray arr)
         {
-            return ConvertArrayToHtml(doc, arr, currentPath, sourceLanguage, assetService, datasetId, referencedEntries);
+            return ConvertArrayToHtml(doc, arr, currentPath, sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
         }
         else if (token is JValue)
         {
@@ -148,7 +150,7 @@ public static class JsonToHtmlConverter
     }
 
     private static HtmlNode? ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath, string sourceLanguage,
-        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null)
+        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null, List<FieldSizeRestriction>? fieldRestrictions = null)
     {
         if (IsInternationalizedValue(obj))
         {
@@ -164,6 +166,7 @@ public static class JsonToHtmlConverter
                 {
                     var div = doc.CreateElement("div");
                     div.SetAttributeValue("data-json-path", $"{currentPath}[{lang}].value");
+                    ApplySizeRestriction(div, currentPath, fieldRestrictions);
                     div.AppendChild(doc.CreateTextNode(valueToken.ToString()));
                     return div;
                 }
@@ -186,7 +189,7 @@ public static class JsonToHtmlConverter
                         }
                         else
                         {
-                            var childNode = ConvertTokenToHtml(doc, childValue, childPath, sourceLanguage, assetService, datasetId, referencedEntries);
+                            var childNode = ConvertTokenToHtml(doc, childValue, childPath, sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
                             if (childNode != null)
                             {
                                 div.AppendChild(childNode);
@@ -213,7 +216,7 @@ public static class JsonToHtmlConverter
             if (property.Name.StartsWith("_")) continue; 
 
             string childPath = currentPath == null ? property.Name : $"{currentPath}.{property.Name}";
-            var childNode = ConvertTokenToHtml(doc, property.Value, childPath, sourceLanguage, assetService, datasetId, referencedEntries);
+            var childNode = ConvertTokenToHtml(doc, property.Value, childPath, sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
             if (childNode != null)
             {
                 hasChildren = true;
@@ -225,7 +228,7 @@ public static class JsonToHtmlConverter
     }
 
     private static HtmlNode? ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath, string sourceLanguage, 
-        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null)
+        AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null, List<FieldSizeRestriction>? fieldRestrictions = null)
     {
         if (IsInternationalizedArray(arr))
         {
@@ -235,7 +238,7 @@ public static class JsonToHtmlConverter
 
             if (itemForSource != null)
             {
-                var itemNode = ConvertObjectToHtml(doc, itemForSource, currentPath, sourceLanguage, assetService, datasetId, referencedEntries);
+                var itemNode = ConvertObjectToHtml(doc, itemForSource, currentPath, sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
                 if (itemNode != null)
                 {
                     return itemNode;
@@ -251,7 +254,7 @@ public static class JsonToHtmlConverter
         {
             var item = arr[i];
             string childPath = $"{currentPath}[{i}]";
-            var childNode = ConvertTokenToHtml(doc, item, childPath, sourceLanguage, assetService, datasetId, referencedEntries);
+            var childNode = ConvertTokenToHtml(doc, item, childPath, sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
             if (childNode != null)
             {
                 hasChildren = true;
@@ -283,39 +286,43 @@ public static class JsonToHtmlConverter
         return System.Net.WebUtility.HtmlEncode(text);
     }
     
-    private static string GetContentTitle(JObject content, string sourceLanguage)
+    private static void ApplySizeRestriction(HtmlNode node, string currentPath, List<FieldSizeRestriction>? fieldRestrictions)
     {
-        if (content.TryGetValue("title", out var titleToken))
+        if (fieldRestrictions == null || !fieldRestrictions.Any())
         {
-            if (titleToken is JArray titleArray && IsInternationalizedArray(titleArray))
+            return;
+        }
+
+        var fieldName = ExtractFieldName(currentPath);
+        if (fieldName != null)
+        {
+            var restriction = fieldRestrictions.FirstOrDefault(r => r.FieldName == fieldName);
+            if (restriction != null && restriction.Restrictions != null!)
             {
-                var localizedTitle = titleArray
-                    .OfType<JObject>()
-                    .FirstOrDefault(o => o["_key"]?.ToString() == sourceLanguage);
-                
-                if (localizedTitle != null && localizedTitle["value"] != null)
+                var serialized = SizeRestrictionHelper.Serialize(restriction.Restrictions);
+                if (serialized != null)
                 {
-                    return localizedTitle["value"]!.ToString();
+                    node.SetAttributeValue("data-blackbird-size", serialized);
                 }
             }
-            else if (titleToken.Type == JTokenType.String)
-            {
-                return titleToken.ToString();
-            }
         }
-        
-        if (content.TryGetValue("name", out var nameToken) && nameToken.Type == JTokenType.String)
+    }
+    
+    private static string? ExtractFieldName(string currentPath)
+    {
+        if (string.IsNullOrEmpty(currentPath))
         {
-            return nameToken.ToString();
+            return null;
         }
-        
-        if (content.TryGetValue("slug", out var slugToken) && 
-            slugToken is JObject slugObj &&
-            slugObj["current"] != null)
+
+        var parts = currentPath.Split('.');
+        if (parts.Length > 0)
         {
-            return slugObj["current"]!.ToString();
+            var firstPart = parts[0];
+            var bracketIndex = firstPart.IndexOf('[');
+            return bracketIndex >= 0 ? firstPart.Substring(0, bracketIndex) : firstPart;
         }
-        
-        return string.Empty;
+
+        return null;
     }
 }
