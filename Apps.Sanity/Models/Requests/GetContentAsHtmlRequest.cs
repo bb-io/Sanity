@@ -20,4 +20,10 @@ public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
     
     [Display("Reference field names", Description = "Reference field names by default should be called 'reference' but if your schema uses different names for reference fields, you can specify them here. Please note that 'reference' is always included even if not specified here.")]
     public IEnumerable<string>? ReferenceFieldNames { get; set; }
+    
+    [Display("Field names", Description = "Names of fields for which to apply character limits. Should correspond with 'Field max length' values.")]
+    public IEnumerable<string>? FieldNames { get; set; }
+    
+    [Display("Field max length", Description = "Maximum character length for each field specified in 'Field names'. Values should be provided in the same order.")]
+    public IEnumerable<int>? FieldMaxLength { get; set; }
 }

@@ -1,6 +1,7 @@
 using System.Text;
 using Apps.Sanity.Api;
 using Apps.Sanity.Invocables;
+using Apps.Sanity.Models;
 using Apps.Sanity.Models.Dtos;
 using Apps.Sanity.Models.Identifiers;
 using Apps.Sanity.Models.Requests;
@@ -85,7 +86,32 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var assetService = new AssetService(InvocationContext);
-        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, assetService, getContentAsHtmlRequest.ToString(), referencedEntries, getContentAsHtmlRequest.OrderOfFields);
+        
+        List<FieldSizeRestriction>? fieldRestrictions = null;
+        if (getContentAsHtmlRequest.FieldNames != null && getContentAsHtmlRequest.FieldMaxLength != null)
+        {
+            var fieldNames = getContentAsHtmlRequest.FieldNames.ToList();
+            var fieldLengths = getContentAsHtmlRequest.FieldMaxLength.ToList();
+            
+            if (fieldNames.Count != fieldLengths.Count)
+            {
+                throw new PluginMisconfigurationException(
+                    "The number of field names must match the number of field max length values.");
+            }
+            
+            fieldRestrictions = fieldNames
+                .Zip(fieldLengths, (name, length) => new FieldSizeRestriction
+                {
+                    FieldName = name,
+                    Restrictions = new Blackbird.Filters.Shared.SizeRestrictions
+                    {
+                        MaximumSize = length
+                    }
+                })
+                .ToList();
+        }
+        
+        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, assetService, getContentAsHtmlRequest.ToString(), referencedEntries, getContentAsHtmlRequest.OrderOfFields, fieldRestrictions);
         var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
         memoryStream.Position = 0;
 
