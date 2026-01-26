@@ -11,7 +11,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
 {
     private static readonly HashSet<string> DefaultExcludedFields = new(StringComparer.OrdinalIgnoreCase)
     {
-        "_createdAt", "_id", "_rev", "_type", "_updatedAt", "language"
+        "_createdAt", "_id", "_rev", "_type", "_updatedAt", "language", "_system"
     };
 
     public string ToHtml(JObject jObject, string contentId, string sourceLanguage, AssetService assetService,

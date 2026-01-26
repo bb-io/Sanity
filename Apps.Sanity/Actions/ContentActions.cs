@@ -305,7 +305,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             };
 
             var updateRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
-                .WithJsonBody(mutation.ToString());
+                .WithJsonBody(mutation);
 
             await Client.ExecuteWithErrorHandling<TransactionResponse>(updateRequest);
         }

@@ -23,9 +23,9 @@ public class TranslationMetadataService
     {
         var query = $"*[_type == \"translation.metadata\" && references($id)][0]{{\"translations\": translations[].value->{{_id,language}}}}";
         
-        var request = new RestRequest($"/data/query/{datasetId}")
+        var request = new ApiRequest($"/data/query/{datasetId}", Method.Get, _creds)
             .AddQueryParameter("query", query)
-            .AddQueryParameter("$id", baseDocumentId);
+            .AddQueryParameter("$id", $"\"{baseDocumentId}\"");
 
         var response = await _apiClient.ExecuteWithErrorHandling<SearchResponse<JObject>>(request);
         
@@ -68,9 +68,9 @@ public class TranslationMetadataService
             }
         };
 
-        var request = new RestRequest($"/data/mutate/{datasetId}")
+        var request = new ApiRequest($"/data/mutate/{datasetId}", Method.Post, _creds)
             .AddQueryParameter("returnIds", "true")
-            .AddJsonBody(mutation.ToString());
+            .AddStringBody(mutation.ToString(), ContentType.Json);
 
         var response = await _apiClient.ExecuteWithErrorHandling<MutateResponse>(request);
         
@@ -101,9 +101,9 @@ public class TranslationMetadataService
     {
         var query = $"*[_type == \"translation.metadata\" && references($id)][0]";
         
-        var request = new RestRequest($"/data/query/{datasetId}")
+        var request = new ApiRequest($"/data/query/{datasetId}", Method.Get, _creds)
             .AddQueryParameter("query", query)
-            .AddQueryParameter("$id", baseDocumentId);
+            .AddQueryParameter("$id", $"\"{baseDocumentId}\"");
 
         var response = await _apiClient.ExecuteWithErrorHandling<SearchResponse<JObject>>(request);
         
@@ -150,8 +150,8 @@ public class TranslationMetadataService
             }
         };
 
-        var request = new RestRequest($"/data/mutate/{datasetId}")
-            .AddJsonBody(mutation.ToString());
+        var request = new ApiRequest($"/data/mutate/{datasetId}", Method.Post, _creds)
+            .AddStringBody(mutation.ToString(), ContentType.Json);
 
         try
         {
@@ -217,8 +217,8 @@ public class TranslationMetadataService
             }
         };
 
-        var request = new RestRequest($"/data/mutate/{datasetId}")
-            .AddJsonBody(mutation.ToString());
+        var request = new ApiRequest($"/data/mutate/{datasetId}", Method.Post, _creds)
+            .AddStringBody(mutation.ToString(), ContentType.Json);
 
         try
         {
