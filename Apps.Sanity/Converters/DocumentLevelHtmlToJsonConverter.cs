@@ -90,9 +90,9 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
         result.Clear();
         foreach (var child in richTextNode.ChildNodes)
         {
-            if (child.NodeType == HtmlNodeType.Element && child.Name == "p")
+            if (child.NodeType == HtmlNodeType.Element)
             {
-                var block = ParseBlockFromParagraph(child);
+                var block = ParseBlockFromHtmlElement(child);
                 if (block != null)
                 {
                     result.Add(block);
@@ -103,25 +103,59 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
         return result;
     }
 
-    private static JObject? ParseBlockFromParagraph(HtmlNode pNode)
+    private static JObject? ParseBlockFromHtmlElement(HtmlNode element)
     {
+        var blockKey = element.GetAttributeValue("data-block-key", null);
+        if (string.IsNullOrEmpty(blockKey))
+        {
+            blockKey = Guid.NewGuid().ToString().Replace("-", "").Substring(0, 12);
+        }
+
         var block = new JObject
         {
             ["_type"] = "block",
-            ["_key"] = Guid.NewGuid().ToString().Replace("-", "").Substring(0, 12),
-            ["style"] = "normal",
+            ["_key"] = blockKey,
             ["markDefs"] = new JArray(),
             ["children"] = new JArray()
         };
 
+        // Determine style based on HTML tag
+        var style = element.Name.ToLower() switch
+        {
+            "h1" => "h1",
+            "h2" => "h2",
+            "h3" => "h3",
+            "h4" => "h4",
+            "h5" => "h5",
+            "h6" => "h6",
+            _ => "normal"
+        };
+        block["style"] = style;
+
+        // Handle list items
+        if (element.Name == "li")
+        {
+            var listType = element.GetAttributeValue("data-list-type", "bullet");
+            var listLevel = element.GetAttributeValue("data-list-level", "1");
+            
+            block["listItem"] = listType;
+            if (int.TryParse(listLevel, out var level))
+            {
+                block["level"] = level;
+            }
+        }
+
         var children = (JArray)block["children"]!;
-        ParseInlineContent(pNode, children);
+        var markDefs = (JArray)block["markDefs"]!;
+        ParseInlineContent(element, children, markDefs);
 
         return block;
     }
 
-    private static void ParseInlineContent(HtmlNode node, JArray children)
+    private static void ParseInlineContent(HtmlNode node, JArray children, JArray markDefs, List<string>? currentMarks = null)
     {
+        currentMarks ??= new List<string>();
+
         foreach (var child in node.ChildNodes)
         {
             if (child.NodeType == HtmlNodeType.Text)
@@ -134,13 +168,46 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                         ["_type"] = "span",
                         ["_key"] = Guid.NewGuid().ToString().Replace("-", "").Substring(0, 12),
                         ["text"] = text,
-                        ["marks"] = new JArray()
+                        ["marks"] = new JArray(currentMarks)
                     });
                 }
             }
             else if (child.NodeType == HtmlNodeType.Element)
             {
-                ParseInlineContent(child, children);
+                var elementName = child.Name.ToLower();
+                var newMarks = new List<string>(currentMarks);
+
+                // Handle links
+                if (elementName == "a" && child.Attributes["href"] != null)
+                {
+                    var href = child.GetAttributeValue("href", "");
+                    var markKey = Guid.NewGuid().ToString().Replace("-", "").Substring(0, 12);
+                    
+                    markDefs.Add(new JObject
+                    {
+                        ["_key"] = markKey,
+                        ["_type"] = "link",
+                        ["href"] = href
+                    });
+                    
+                    newMarks.Add(markKey);
+                    ParseInlineContent(child, children, markDefs, newMarks);
+                }
+                // Handle formatting marks
+                else if (elementName == "b" || elementName == "strong")
+                {
+                    newMarks.Add("strong");
+                    ParseInlineContent(child, children, markDefs, newMarks);
+                }
+                else if (elementName == "i" || elementName == "em")
+                {
+                    newMarks.Add("em");
+                    ParseInlineContent(child, children, markDefs, newMarks);
+                }
+                else
+                {
+                    ParseInlineContent(child, children, markDefs, currentMarks);
+                }
             }
         }
     }

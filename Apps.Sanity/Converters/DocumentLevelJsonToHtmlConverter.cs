@@ -105,11 +105,37 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
             {
                 var refId = obj["_ref"]!.ToString();
-                var referenceDiv = doc.CreateElement("div");
-                referenceDiv.SetAttributeValue("data-json-path", currentPath);
-                referenceDiv.SetAttributeValue("data-ref-id", refId);
-                referenceDiv.SetAttributeValue("class", "reference");
-                return referenceDiv;
+                
+                // Check if this is an image asset reference
+                if (refId.StartsWith("image-"))
+                {
+                    try
+                    {
+                        var assetUrl = assetService.GetAssetUrlAsync(datasetId, refId).GetAwaiter().GetResult();
+                        var imgElement = doc.CreateElement("img");
+                        imgElement.SetAttributeValue("src", assetUrl);
+                        imgElement.SetAttributeValue("data-json-path", currentPath);
+                        imgElement.SetAttributeValue("data-ref-id", refId);
+                        return imgElement;
+                    }
+                    catch
+                    {
+                        // Fallback to div if asset URL cannot be retrieved
+                        var referenceDiv = doc.CreateElement("div");
+                        referenceDiv.SetAttributeValue("data-json-path", currentPath);
+                        referenceDiv.SetAttributeValue("data-ref-id", refId);
+                        referenceDiv.SetAttributeValue("class", "reference asset");
+                        return referenceDiv;
+                    }
+                }
+                else
+                {
+                    var referenceDiv = doc.CreateElement("div");
+                    referenceDiv.SetAttributeValue("data-json-path", currentPath);
+                    referenceDiv.SetAttributeValue("data-ref-id", refId);
+                    referenceDiv.SetAttributeValue("class", "reference");
+                    return referenceDiv;
+                }
             }
 
             return ConvertObjectToHtml(doc, obj, currentPath, assetService, datasetId, fieldRestrictions);
