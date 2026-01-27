@@ -14,9 +14,14 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         "_createdAt", "_id", "_rev", "_type", "_updatedAt", "language", "_system"
     };
 
-    public string ToHtml(JObject jObject, string contentId, string sourceLanguage, AssetService assetService,
-        string datasetId, Dictionary<string, JObject>? referencedEntries = null,
-        IEnumerable<string>? orderOfFields = null, List<FieldSizeRestriction>? fieldRestrictions = null,
+    public string ToHtml(JObject jObject, 
+        string contentId, 
+        string sourceLanguage, 
+        AssetService assetService,
+        string datasetId, 
+        Dictionary<string, JObject>? referencedEntries = null,
+        IEnumerable<string>? orderOfFields = null, 
+        List<FieldSizeRestriction>? fieldRestrictions = null,
         IEnumerable<string>? excludedFields = null)
     {
         var allExcludedFields = new HashSet<string>(DefaultExcludedFields, StringComparer.OrdinalIgnoreCase);
@@ -75,7 +80,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             }
 
             var propValue = property.Value;
-            var convertedNode = ConvertTokenToHtml(doc, propValue, propName, assetService, datasetId, fieldRestrictions);
+            var convertedNode = ConvertTokenToHtml(doc, propValue, propName, assetService, datasetId, fieldRestrictions, referencedEntries);
             if (convertedNode != null)
             {
                 mainContentDiv.AppendChild(convertedNode);
@@ -97,8 +102,13 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         return orderedProperties;
     }
 
-    private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath,
-        AssetService assetService, string datasetId, List<FieldSizeRestriction>? fieldRestrictions = null)
+    private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, 
+        JToken token, 
+        string currentPath,
+        AssetService assetService, 
+        string datasetId, 
+        List<FieldSizeRestriction>? fieldRestrictions = null, 
+        Dictionary<string, JObject>? referencedEntries = null)
     {
         if (token is JObject obj)
         {
@@ -106,7 +116,6 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             {
                 var refId = obj["_ref"]!.ToString();
                 
-                // Check if this is an image asset reference
                 if (refId.StartsWith("image-"))
                 {
                     try
@@ -134,15 +143,38 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                     referenceDiv.SetAttributeValue("data-json-path", currentPath);
                     referenceDiv.SetAttributeValue("data-ref-id", refId);
                     referenceDiv.SetAttributeValue("class", "reference");
+                    var refContent = referencedEntries != null && referencedEntries.ContainsKey(refId)
+                        ? referencedEntries[refId]
+                        : null;
+                    
+                    if(refContent != null && refContent["language"] != null)
+                    {
+                        
+                        foreach (var refProperty in refContent.Properties())
+                        {
+                            if (DefaultExcludedFields.Contains(refProperty.Name))
+                                continue;
+                            
+                            var refFieldPath = $"{refId}.{refProperty.Name}";
+                            var refFieldNode = ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, 
+                                assetService, datasetId, fieldRestrictions, null);
+                            
+                            if (refFieldNode != null)
+                            {
+                                referenceDiv.AppendChild(refFieldNode);
+                            }
+                        }
+                    }
+                    
                     return referenceDiv;
                 }
             }
 
-            return ConvertObjectToHtml(doc, obj, currentPath, assetService, datasetId, fieldRestrictions);
+            return ConvertObjectToHtml(doc, obj, currentPath, assetService, datasetId, fieldRestrictions, referencedEntries);
         }
         else if (token is JArray arr)
         {
-            return ConvertArrayToHtml(doc, arr, currentPath, assetService, datasetId, fieldRestrictions);
+            return ConvertArrayToHtml(doc, arr, currentPath, assetService, datasetId, fieldRestrictions, referencedEntries);
         }
         else if (token is JValue jValue)
         {
@@ -161,7 +193,8 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     }
 
     private static HtmlNode? ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath,
-        AssetService assetService, string datasetId, List<FieldSizeRestriction>? fieldRestrictions = null)
+        AssetService assetService, string datasetId, List<FieldSizeRestriction>? fieldRestrictions = null, 
+        Dictionary<string, JObject>? referencedEntries = null)
     {
         var typeValue = obj["_type"]?.ToString();
         
@@ -181,7 +214,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 continue;
 
             string childPath = $"{currentPath}.{property.Name}";
-            var childNode = ConvertTokenToHtml(doc, property.Value, childPath, assetService, datasetId, fieldRestrictions);
+            var childNode = ConvertTokenToHtml(doc, property.Value, childPath, assetService, datasetId, fieldRestrictions, referencedEntries);
             if (childNode != null)
             {
                 hasChildren = true;
@@ -193,7 +226,8 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     }
 
     private static HtmlNode? ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath,
-        AssetService assetService, string datasetId, List<FieldSizeRestriction>? fieldRestrictions = null)
+        AssetService assetService, string datasetId, List<FieldSizeRestriction>? fieldRestrictions = null, 
+        Dictionary<string, JObject>? referencedEntries = null)
     {
         if (arr.Count > 0 && arr[0] is JObject firstItem)
         {
@@ -211,7 +245,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         {
             var item = arr[i];
             string childPath = $"{currentPath}[{i}]";
-            var childNode = ConvertTokenToHtml(doc, item, childPath, assetService, datasetId, fieldRestrictions);
+            var childNode = ConvertTokenToHtml(doc, item, childPath, assetService, datasetId, fieldRestrictions, referencedEntries);
             if (childNode != null)
             {
                 hasChildren = true;

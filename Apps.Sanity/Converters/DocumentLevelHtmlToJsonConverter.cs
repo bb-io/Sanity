@@ -105,7 +105,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
 
     private static JObject? ParseBlockFromHtmlElement(HtmlNode element)
     {
-        var blockKey = element.GetAttributeValue("data-block-key", null);
+        var blockKey = element.GetAttributeValue("data-block-key", string.Empty);
         if (string.IsNullOrEmpty(blockKey))
         {
             blockKey = Guid.NewGuid().ToString().Replace("-", "").Substring(0, 12);
