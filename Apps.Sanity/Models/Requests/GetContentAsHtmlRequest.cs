@@ -2,13 +2,13 @@
 using Apps.Sanity.Models.Identifiers;
 using Blackbird.Applications.SDK.Blueprints.Interfaces.CMS;
 using Blackbird.Applications.Sdk.Common;
-using Blackbird.Applications.Sdk.Common.Dynamic;
+using Blackbird.Applications.Sdk.Common.Dictionaries;
 
 namespace Apps.Sanity.Models.Requests;
 
 public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
 {
-    [Display("Localization strategy"), DataSource(typeof(LocalizationStrategyDataSource))]
+    [Display("Localization strategy"), StaticDataSource(typeof(LocalizationStrategyDataSource))]
     public string LocalizationStrategy { get; set; } = default!;
     
     [Display("Source language")]
