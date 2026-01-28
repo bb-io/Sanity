@@ -30,6 +30,11 @@ public static class JsonToHtmlConverter
         metaBlackbird.SetAttributeValue("content", EscapeHtml(contentId));
         headNode.AppendChild(metaBlackbird);
 
+        var metaStrategy = doc.CreateElement("meta");
+        metaStrategy.SetAttributeValue("name", "blackbird-localization-strategy");
+        metaStrategy.SetAttributeValue("content", "FieldLevel");
+        headNode.AppendChild(metaStrategy);
+
         var bodyNode = doc.CreateElement("body");
         htmlNode.AppendChild(bodyNode);
 
