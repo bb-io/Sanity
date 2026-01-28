@@ -34,8 +34,11 @@ Before setting up the integration, ensure that you have access to a Sanity proje
 
 - **Search content**: Search for content within a specific dataset. If no dataset is specified, the production dataset is used by default.
 - **Get content**: Retrieve a content object from a specific dataset using its content identifier.
-- **Download content**: Retrieve localizable content fields as an HTML file.
-- **Upload content**: Update localizable content fields using an HTML file.
+- **Download content**: Retrieve localizable content fields as an HTML file. Supports both field-level and document-level localization strategies. Optional parameters include:
+  - **Localization strategy**: Choose between field-level (default) or document-level localization
+  - **Source language**: Specify the source language code for the content
+  - **Excluded fields**: List fields that should be excluded from the HTML output
+- **Upload content**: Update localizable content fields using an HTML file. Automatically detects the localization strategy from the HTML metadata.
 - **Create content**: Create a content object based on its type and parameters.
 - **Delete content**: Remove a content object from a dataset using its content identifier.
 - **Add reference to content**: Add a reference to another content object within a specific dataset.
@@ -43,7 +46,11 @@ Before setting up the integration, ensure that you have access to a Sanity proje
 
 ## HTML conversion
 
-Please note that this app currently works with the [sanity-plugin-internationalized-array](https://github.com/sanity-io/sanity-plugin-internationalized-array). This means that the app only supports fields of the types **'internationalizedArrayStringValue'** or **'internationalizedArray'**. It will not pick up or update content with a regular string type. Only these field types are supported.
+This app supports two localization strategies:
+
+### Field-level localization
+
+The app works with the [sanity-plugin-internationalized-array](https://github.com/sanity-io/sanity-plugin-internationalized-array) plugin. This means the app supports fields of the types **'internationalizedArrayStringValue'** or **'internationalizedArray'**. It will not pick up or update content with a regular string type. Only these field types are supported.
 
 Here is an example of supported fields:
 
@@ -63,9 +70,16 @@ defineField({
 })
 ```
 
-In the future, we plan to support additional localization plugins, such as the [document-internationalization plugin](https://github.com/sanity-io/document-internationalization), which works at the document level.
+### Document-level localization
 
-> If you need to translate regular content types (such as string or rich text blocks), please contact us, and we will explore a solution.
+The app also supports document-level localization through the [document-internationalization plugin](https://github.com/sanity-io/document-internationalization). With this strategy, each language version is stored as a separate document with its own unique ID. The app automatically manages the creation of translated documents and maintains proper linking between language versions through `translation.metadata` documents.
+
+When using document-level localization:
+- Select "Document level" as the localization strategy in the **Download content** action
+- The app will create separate documents for each target language during the **Upload content** action
+- Translation metadata documents are automatically created and maintained to link all language versions together
+
+> If you need to translate regular content types (such as string or rich text blocks) without using one of these localization plugins, please contact us, and we will explore a solution.
 
 ## Events
 
