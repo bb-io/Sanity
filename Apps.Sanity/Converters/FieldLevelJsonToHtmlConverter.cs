@@ -7,13 +7,14 @@ namespace Apps.Sanity.Converters;
 
 public class FieldLevelJsonToHtmlConverter : IJsonToHtmlConverter
 {
-    public string ToHtml(JObject jObject, string contentId, string sourceLanguage, AssetService assetService,
+    public Task<string> ToHtmlAsync(JObject jObject, string contentId, string sourceLanguage, AssetService assetService,
         string datasetId, Dictionary<string, JObject>? referencedEntries = null,
         IEnumerable<string>? orderOfFields = null, List<FieldSizeRestriction>? fieldRestrictions = null,
         IEnumerable<string>? excludedFields = null)
     {
         // Use existing JsonToHtmlConverter logic
-        return JsonToHtmlConverter.ToHtml(jObject, contentId, sourceLanguage, assetService, datasetId,
+        var html = JsonToHtmlConverter.ToHtml(jObject, contentId, sourceLanguage, assetService, datasetId,
             referencedEntries, orderOfFields, fieldRestrictions);
+        return Task.FromResult(html);
     }
 }

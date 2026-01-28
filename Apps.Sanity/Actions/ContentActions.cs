@@ -120,7 +120,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         
         var strategy = Enum.Parse<LocalizationStrategy>(getContentAsHtmlRequest.LocalizationStrategy);
         var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
-        var html = converter.ToHtml(
+        var html = await converter.ToHtmlAsync(
             content, 
             getContentAsHtmlRequest.ContentId, 
             getContentAsHtmlRequest.SourceLanguage, 
