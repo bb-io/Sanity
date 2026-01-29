@@ -1,11 +1,16 @@
-﻿using Apps.Sanity.Models.Identifiers;
+﻿using Apps.Sanity.DataSourceHandlers;
+using Apps.Sanity.Models.Identifiers;
 using Blackbird.Applications.SDK.Blueprints.Interfaces.CMS;
 using Blackbird.Applications.Sdk.Common;
+using Blackbird.Applications.Sdk.Common.Dictionaries;
 
 namespace Apps.Sanity.Models.Requests;
 
 public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
 {
+    [Display("Localization strategy"), StaticDataSource(typeof(LocalizationStrategyDataSource))]
+    public string LocalizationStrategy { get; set; } = default!;
+    
     [Display("Source language")]
     public string SourceLanguage { get; set; } = string.Empty;
 
@@ -26,4 +31,7 @@ public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
     
     [Display("Field max length", Description = "Maximum character length for each field specified in 'Field names'. Values should be provided in the same order.")]
     public IEnumerable<int>? FieldMaxLength { get; set; }
+    
+    [Display("Excluded fields", Description = "Additional field names to exclude from translation (beyond the default system fields: _createdAt, _id, _rev, _type, _updatedAt, language). Only applicable for document level localization.")]
+    public IEnumerable<string>? ExcludedFields { get; set; }
 }

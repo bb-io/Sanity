@@ -1,5 +1,6 @@
 using System.Text;
 using Apps.Sanity.Api;
+using Apps.Sanity.Converters;
 using Apps.Sanity.Invocables;
 using Apps.Sanity.Models;
 using Apps.Sanity.Models.Dtos;
@@ -22,6 +23,7 @@ using Blackbird.Filters.Xliff.Xliff2;
 using Newtonsoft.Json.Linq;
 using RestSharp;
 using HtmlAgilityPack;
+
 
 namespace Apps.Sanity.Actions;
 
@@ -60,6 +62,11 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     [BlueprintActionDefinition(BlueprintAction.DownloadContent)]
     public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
     {
+        if (string.IsNullOrEmpty(getContentAsHtmlRequest.LocalizationStrategy))
+        {
+            throw new PluginMisconfigurationException("Localization strategy must be specified.");
+        }
+        
         var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
             getContentAsHtmlRequest.ContentId,
             getContentAsHtmlRequest.GetDatasetIdOrDefault());
@@ -111,7 +118,19 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 .ToList();
         }
         
-        var html = content.ToHtml(getContentAsHtmlRequest.ContentId, getContentAsHtmlRequest.SourceLanguage, assetService, getContentAsHtmlRequest.ToString(), referencedEntries, getContentAsHtmlRequest.OrderOfFields, fieldRestrictions);
+        var strategy = Enum.Parse<LocalizationStrategy>(getContentAsHtmlRequest.LocalizationStrategy);
+        var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
+        var html = await converter.ToHtmlAsync(
+            content, 
+            getContentAsHtmlRequest.ContentId, 
+            getContentAsHtmlRequest.SourceLanguage, 
+            assetService, 
+            getContentAsHtmlRequest.ToString(), 
+            referencedEntries, 
+            getContentAsHtmlRequest.OrderOfFields, 
+            fieldRestrictions,
+            getContentAsHtmlRequest.ExcludedFields);
+        
         var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
         memoryStream.Position = 0;
 
@@ -139,6 +158,20 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var contentId = request.ContentId ?? HtmlHelper.ExtractContentId(html);
+        var localizationStrategy = HtmlHelper.ExtractLocalizationStrategy(html);
+
+        if (localizationStrategy == LocalizationStrategy.DocumentLevel)
+        {
+            await UpdateContentDocumentLevelAsync(request, html, contentId);
+        }
+        else
+        {
+            await UpdateContentFieldLevelAsync(request, html, contentId);
+        }
+    }
+
+    private async Task UpdateContentFieldLevelAsync(UpdateContentFromHtmlRequest request, string html, string contentId)
+    {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
@@ -148,7 +181,6 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         JObject mainContent;
         if (!publish && isDraftId)
         {
-            // Ensure draft exists before updating
             mainContent = await _draftHelper.EnsureDraftExistsForUpdateAsync(
                 contentId,
                 request);
@@ -188,7 +220,9 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             }
         }
 
-        var allPatches = HtmlToJsonConvertor.ToJsonPatches(html, mainContent, request.Locale, publish, referencedContents);
+        var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.FieldLevel);
+        var allPatches = converter.ToJsonPatches(html, mainContent, request.Locale, publish, referencedContents);
+        
         var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
             .WithJsonBody(new
             {
@@ -211,6 +245,99 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             throw new PluginApplicationException(
                 "An unexpected error occurred while updating the content. Please contact support for further assistance.");
+        }
+    }
+
+    private async Task UpdateContentDocumentLevelAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
+    {
+        var translationService = new TranslationMetadataService(Client, Creds);
+        
+        var baseDocumentObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
+            baseDocumentId,
+            request.GetDatasetIdOrDefault());
+
+        if (baseDocumentObjects.Count == 0)
+        {
+            throw new PluginMisconfigurationException(
+                "Base document not found. Please verify that the content ID is correct.");
+        }
+
+        var baseDocument = baseDocumentObjects.First();
+        var baseLanguage = baseDocument["language"]?.ToString();
+        
+        if (string.IsNullOrEmpty(baseLanguage))
+        {
+            throw new PluginMisconfigurationException(
+                "Base document does not have a language field. Document level localization requires a 'language' field.");
+        }
+
+        var existingTranslations = await translationService.GetTranslationsAsync(baseDocumentId, request.GetDatasetIdOrDefault());
+        
+        string translatedDocumentId;
+        var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.DocumentLevel);
+        var translatedContentList = converter.ToJsonPatches(html, baseDocument, request.Locale, request.Publish ?? false, null);
+
+        if (translatedContentList.Count == 0)
+        {
+            throw new PluginApplicationException("No translated content could be extracted from the HTML file.");
+        }
+
+        var translatedContent = translatedContentList[0];
+
+        if (existingTranslations.TryGetValue(request.Locale, out var existingTranslatedDocId))
+        {
+            translatedDocumentId = existingTranslatedDocId;
+            
+            var mutation = new JObject
+            {
+                ["mutations"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["patch"] = new JObject
+                        {
+                            ["id"] = translatedDocumentId,
+                            ["set"] = translatedContent
+                        }
+                    }
+                }
+            };
+
+            var updateRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
+                .WithJsonBody(mutation);
+
+            await Client.ExecuteWithErrorHandling<TransactionResponse>(updateRequest);
+        }
+        else
+        {
+            translatedContent["_type"] = baseDocument["_type"];
+            
+            try
+            {
+                translatedDocumentId = await translationService.CreateTranslatedDocumentAsync(
+                    request.GetDatasetIdOrDefault(), 
+                    translatedContent);
+            }
+            catch (Exception ex)
+            {
+                throw new PluginApplicationException($"Failed to create translated document. Error: {ex.Message}", ex);
+            }
+
+            try
+            {
+                await translationService.CreateOrUpdateTranslationMetadataAsync(
+                    baseDocumentId, 
+                    translatedDocumentId, 
+                    baseLanguage, 
+                    request.Locale, 
+                    request.GetDatasetIdOrDefault());
+            }
+            catch (Exception ex)
+            {
+                throw new PluginApplicationException(
+                    $"Translated document was created successfully (ID: {translatedDocumentId}), but failed to link it with the base document. Error: {ex.Message}", 
+                    ex);
+            }
         }
     }
 
