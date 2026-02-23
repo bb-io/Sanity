@@ -56,6 +56,14 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         metaStrategy.SetAttributeValue("content", "DocumentLevel");
         headNode.AppendChild(metaStrategy);
 
+        // Store original JSON to preserve non-translatable fields
+        var metaOriginalJson = doc.CreateElement("meta");
+        metaOriginalJson.SetAttributeValue("name", "blackbird-original-json");
+        var originalJsonString = jObject.ToString(Newtonsoft.Json.Formatting.None);
+        var originalJsonBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(originalJsonString));
+        metaOriginalJson.SetAttributeValue("content", originalJsonBase64);
+        headNode.AppendChild(metaOriginalJson);
+
         var bodyNode = doc.CreateElement("body");
         htmlNode.AppendChild(bodyNode);
 

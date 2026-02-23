@@ -21,7 +21,35 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
             return patches;
         }
 
-        var translatedContent = new JObject();
+        // Extract original JSON from meta tag to preserve non-translatable fields
+        JObject translatedContent;
+        var metaOriginalJson = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-original-json']");
+        if (metaOriginalJson != null)
+        {
+            var originalJsonBase64 = metaOriginalJson.GetAttributeValue("content", null!);
+            if (!string.IsNullOrEmpty(originalJsonBase64))
+            {
+                try
+                {
+                    var originalJsonString = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(originalJsonBase64));
+                    translatedContent = JObject.Parse(originalJsonString);
+                }
+                catch
+                {
+                    // Fallback to empty object if parsing fails
+                    translatedContent = new JObject();
+                }
+            }
+            else
+            {
+                translatedContent = new JObject();
+            }
+        }
+        else
+        {
+            // Fallback to empty object if meta tag not found (for backward compatibility)
+            translatedContent = new JObject();
+        }
 
         var richTextNodes = contentRoot.SelectNodes(".//*[@data-rich-text='true']");
         if (richTextNodes != null)
@@ -31,7 +59,9 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 var path = richTextNode.GetAttributeValue("data-json-path", null!);
                 if (string.IsNullOrEmpty(path)) continue;
 
-                var richTextArray = ConvertRichTextFromHtml(richTextNode);
+                // Get original rich text array from translatedContent to preserve marks
+                var originalRichTextArray = GetNestedProperty(translatedContent, path) as JArray;
+                var richTextArray = ConvertRichTextFromHtml(richTextNode, originalRichTextArray);
                 if (richTextArray != null)
                 {
                     SetNestedProperty(translatedContent, path, richTextArray);
@@ -59,6 +89,23 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
 
         if (translatedContent.HasValues)
         {
+            // Handle draft/published ID conversion
+            if (translatedContent["_id"] != null)
+            {
+                var currentId = translatedContent["_id"]!.ToString();
+                
+                if (!publish && !currentId.StartsWith("drafts."))
+                {
+                    // Convert to draft ID if publish is false and not already a draft
+                    translatedContent["_id"] = $"drafts.{currentId}";
+                }
+                else if (publish && currentId.StartsWith("drafts."))
+                {
+                    // Convert to published ID if publish is true and currently a draft
+                    translatedContent["_id"] = currentId.Substring("drafts.".Length);
+                }
+            }
+            
             translatedContent["language"] = targetLanguage;
 
             patches.Add(translatedContent);
@@ -67,24 +114,70 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
         return patches;
     }
 
-    private static JArray ConvertRichTextFromHtml(HtmlNode richTextNode)
+    private static JArray ConvertRichTextFromHtml(HtmlNode richTextNode, JArray? originalRichTextArray = null)
     {
-        var originalJson = richTextNode.GetAttributeValue("data-original-json", null!);
         JArray result;
-        if (!string.IsNullOrEmpty(originalJson))
+        
+        // First, try to use the provided original array from translatedContent
+        if (originalRichTextArray != null && originalRichTextArray.Count > 0)
         {
-            try
+            // Deep clone to avoid modifying the original
+            result = (JArray)originalRichTextArray.DeepClone();
+        }
+        else
+        {
+            // Fallback: try to parse from HTML attribute
+            var originalJson = richTextNode.GetAttributeValue("data-original-json", null!);
+            if (!string.IsNullOrEmpty(originalJson))
             {
-                result = JArray.Parse(originalJson);
+                try
+                {
+                    // Ensure HTML entities are decoded
+                    originalJson = System.Net.WebUtility.HtmlDecode(originalJson);
+                    result = JArray.Parse(originalJson);
+                }
+                catch
+                {
+                    result = new JArray();
+                }
             }
-            catch
+            else
             {
                 result = new JArray();
             }
         }
-        else
+
+        // Use original JSON as base and only update text from HTML
+        if (result.Count > 0)
         {
-            result = new JArray();
+            // Build a map of block keys to HTML elements
+            var blockElementMap = new Dictionary<string, HtmlNode>();
+            foreach (var child in richTextNode.ChildNodes)
+            {
+                if (child.NodeType == HtmlNodeType.Element)
+                {
+                    var blockKey = child.GetAttributeValue("data-block-key", null!);
+                    if (!string.IsNullOrEmpty(blockKey))
+                    {
+                        blockElementMap[blockKey] = child;
+                    }
+                }
+            }
+
+            // Update text in original blocks while preserving marks and markDefs
+            foreach (var block in result)
+            {
+                if (block is JObject blockObj)
+                {
+                    var blockKey = blockObj["_key"]?.ToString();
+                    if (!string.IsNullOrEmpty(blockKey) && blockElementMap.TryGetValue(blockKey, out var htmlElement))
+                    {
+                        UpdateBlockTextFromHtml(blockObj, htmlElement);
+                    }
+                }
+            }
+
+            return result;
         }
 
         result.Clear();
@@ -101,6 +194,97 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
         }
 
         return result;
+    }
+
+    private static void UpdateBlockTextFromHtml(JObject block, HtmlNode htmlElement)
+    {
+        var children = block["children"] as JArray;
+        if (children == null || children.Count == 0)
+        {
+            return;
+        }
+
+        var htmlText = ExtractPlainText(htmlElement);
+        if (string.IsNullOrEmpty(htmlText))
+        {
+            return;
+        }
+
+        if (children.Count == 1 && children[0] is JObject singleSpan && singleSpan["_type"]?.ToString() == "span")
+        {
+            singleSpan["text"] = htmlText;
+            return;
+        }
+
+        var textSegments = ExtractTextSegments(htmlElement);
+        var segmentIndex = 0;
+        foreach (var child in children)
+        {
+            if (child is JObject childObj && childObj["_type"]?.ToString() == "span")
+            {
+                if (segmentIndex < textSegments.Count)
+                {
+                    childObj["text"] = textSegments[segmentIndex];
+                    segmentIndex++;
+                }
+            }
+        }
+    }
+
+    private static string ExtractPlainText(HtmlNode element)
+    {
+        var text = element.InnerText.Replace("\n", " ").Trim();
+        return System.Net.WebUtility.HtmlDecode(text);
+    }
+
+    private static List<string> ExtractTextSegments(HtmlNode element)
+    {
+        var segments = new List<string>();
+        ExtractTextSegmentsRecursive(element, segments);
+        return segments;
+    }
+
+    private static void ExtractTextSegmentsRecursive(HtmlNode node, List<string> segments)
+    {
+        foreach (var child in node.ChildNodes)
+        {
+            if (child.NodeType == HtmlNodeType.Text)
+            {
+                var text = child.InnerText;
+                if (!string.IsNullOrEmpty(text))
+                {
+                    segments.Add(text);
+                }
+            }
+            else if (child.NodeType == HtmlNodeType.Element)
+            {
+                // Skip elements with data-mark attribute and recursively process their children
+                if (child.Name.ToLower() == "br")
+                {
+                    // Handle line breaks
+                    if (segments.Count > 0)
+                    {
+                        segments[segments.Count - 1] += "\n";
+                    }
+                }
+                else if (child.Name.ToLower() == "span" && child.Attributes["data-mark"] != null)
+                {
+                    // This is a mark wrapper, process children
+                    ExtractTextSegmentsRecursive(child, segments);
+                }
+                else if (child.Name.ToLower() == "a" || child.Name.ToLower() == "b" || 
+                         child.Name.ToLower() == "i" || child.Name.ToLower() == "strong" || 
+                         child.Name.ToLower() == "em")
+                {
+                    // These are mark wrappers, process children
+                    ExtractTextSegmentsRecursive(child, segments);
+                }
+                else
+                {
+                    ExtractTextSegmentsRecursive(child, segments);
+                }
+            }
+        }
     }
 
     private static JObject? ParseBlockFromHtmlElement(HtmlNode element)
@@ -210,6 +394,57 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 }
             }
         }
+    }
+
+    private static JToken? GetNestedProperty(JObject obj, string propertyPath)
+    {
+        var parts = propertyPath.Split('.');
+        JToken? current = obj;
+
+        foreach (var part in parts)
+        {
+            if (current == null)
+            {
+                return null;
+            }
+
+            var bracketIndex = part.IndexOf('[');
+
+            if (bracketIndex > 0)
+            {
+                var arrayName = part.Substring(0, bracketIndex);
+                var indexStr = part.Substring(bracketIndex + 1, part.Length - bracketIndex - 2);
+
+                if (current is JObject jObj && jObj[arrayName] is JArray arr)
+                {
+                    if (int.TryParse(indexStr, out var index) && index < arr.Count)
+                    {
+                        current = arr[index];
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
+                else
+                {
+                    return null;
+                }
+            }
+            else
+            {
+                if (current is JObject jObj)
+                {
+                    current = jObj[part];
+                }
+                else
+                {
+                    return null;
+                }
+            }
+        }
+
+        return current;
     }
 
     private static void SetNestedProperty(JObject obj, string propertyPath, object value)

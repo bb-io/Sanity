@@ -310,6 +310,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
         else
         {
+            translatedContent["_id"] = Guid.NewGuid().ToString();
             translatedContent["_type"] = baseDocument["_type"];
             
             try
