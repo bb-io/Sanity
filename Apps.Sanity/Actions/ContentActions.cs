@@ -221,9 +221,20 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.FieldLevel);
-        var allPatches = converter.ToJsonPatches(html, mainContent, request.Locale, publish, referencedContents);
+        var mutationResult = converter.ToJsonPatches(html, mainContent, request.Locale, publish, referencedContents);
         
-        var apiRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
+        // Extract field-level patches from the result
+        List<JObject> allPatches = new List<JObject>();
+        if (mutationResult.Mutations.Any())
+        {
+            var mainMutation = mutationResult.Mutations.First();
+            if (mainMutation.Content["fieldLevelPatches"] is JArray patchArray)
+            {
+                allPatches = patchArray.OfType<JObject>().ToList();
+            }
+        }
+        
+        var apiRequest = new ApiRequest($"/data/mutate/{request.GetDatasetIdOrDefault()}", Method.Post, Creds)
             .WithJsonBody(new
             {
                 mutations = allPatches
@@ -273,17 +284,108 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         var existingTranslations = await translationService.GetTranslationsAsync(baseDocumentId, request.GetDatasetIdOrDefault());
         
-        string translatedDocumentId;
         var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.DocumentLevel);
-        var translatedContentList = converter.ToJsonPatches(html, baseDocument, request.Locale, request.Publish ?? false, null);
+        var mutationResult = converter.ToJsonPatches(html, baseDocument, request.Locale, request.Publish ?? false, null);
 
-        if (translatedContentList.Count == 0)
+        if (mutationResult.Mutations.Count == 0)
         {
             throw new PluginApplicationException("No translated content could be extracted from the HTML file.");
         }
 
-        var translatedContent = translatedContentList[0];
+        // Find main document mutation
+        var mainMutation = mutationResult.Mutations.FirstOrDefault(m => m.IsMainDocument);
+        if (mainMutation == null)
+        {
+            throw new PluginApplicationException("Main document mutation not found in the result.");
+        }
 
+        // Build ID mapping for referenced documents
+        var idMapping = new Dictionary<string, string>();
+        
+        // Process referenced documents first
+        foreach (var refMutation in mutationResult.Mutations.Where(m => !m.IsMainDocument))
+        {
+            string localizedRefId;
+            
+            // Check if this referenced document already has a translated version
+            var existingRefTranslations = await translationService.GetTranslationsAsync(
+                refMutation.OriginalDocumentId, 
+                request.GetDatasetIdOrDefault());
+
+            if (existingRefTranslations.TryGetValue(request.Locale, out var existingLocalizedRefId))
+            {
+                // Update existing translated reference document
+                localizedRefId = existingLocalizedRefId;
+                
+                var patchMutation = new JObject
+                {
+                    ["mutations"] = new JArray
+                    {
+                        new JObject
+                        {
+                            ["patch"] = new JObject
+                            {
+                                ["id"] = localizedRefId,
+                                ["set"] = refMutation.Content
+                            }
+                        }
+                    }
+                };
+
+                var patchRequest = new ApiRequest($"/data/mutate/{request.GetDatasetIdOrDefault()}", Method.Post, Creds)
+                    .WithJsonBody(patchMutation);
+
+                await Client.ExecuteWithErrorHandling<TransactionResponse>(patchRequest);
+            }
+            else
+            {
+                try
+                {
+                    localizedRefId = await translationService.CreateTranslatedDocumentAsync(
+                        request.GetDatasetIdOrDefault(), 
+                        refMutation.Content);
+                }
+                catch (Exception ex)
+                {
+                    throw new PluginApplicationException($"Failed to create translated referenced document. Error: {ex.Message}", ex);
+                }
+
+                // Link the translated reference with its base
+                try
+                {
+                    // Get base language for referenced document
+                    var baseRefDoc = await _draftHelper.GetContentWithDraftFallbackAsync(
+                        refMutation.OriginalDocumentId, 
+                        request.GetDatasetIdOrDefault());
+                    
+                    var baseRefLanguage = baseRefDoc.FirstOrDefault()?["language"]?.ToString() ?? baseLanguage;
+                    
+                    await translationService.CreateOrUpdateTranslationMetadataAsync(
+                        refMutation.OriginalDocumentId, 
+                        localizedRefId, 
+                        baseRefLanguage, 
+                        request.Locale, 
+                        request.GetDatasetIdOrDefault());
+                }
+                catch (Exception ex)
+                {
+                    throw new PluginApplicationException(
+                        $"Translated referenced document was created (ID: {localizedRefId}), but failed to link it. Error: {ex.Message}", 
+                        ex);
+                }
+            }
+
+            // Add to ID mapping
+            foreach (var mapping in refMutation.ReferenceMapping)
+            {
+                idMapping[mapping.Key] = localizedRefId;
+            }
+        }
+
+        // Update references in main document content
+        UpdateReferences(mainMutation.Content, idMapping);
+        
+        string translatedDocumentId;
         if (existingTranslations.TryGetValue(request.Locale, out var existingTranslatedDocId))
         {
             translatedDocumentId = existingTranslatedDocId;
@@ -297,27 +399,27 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                         ["patch"] = new JObject
                         {
                             ["id"] = translatedDocumentId,
-                            ["set"] = translatedContent
+                            ["set"] = mainMutation.Content
                         }
                     }
                 }
             };
 
-            var updateRequest = new ApiRequest($"/data/mutate/{request}", Method.Post, Creds)
+            var updateRequest = new ApiRequest($"/data/mutate/{request.GetDatasetIdOrDefault()}", Method.Post, Creds)
                 .WithJsonBody(mutation);
 
             await Client.ExecuteWithErrorHandling<TransactionResponse>(updateRequest);
         }
         else
         {
-            translatedContent["_id"] = Guid.NewGuid().ToString();
-            translatedContent["_type"] = baseDocument["_type"];
+            mainMutation.Content["_id"] = Guid.NewGuid().ToString();
+            mainMutation.Content["_type"] = baseDocument["_type"];
             
             try
             {
                 translatedDocumentId = await translationService.CreateTranslatedDocumentAsync(
                     request.GetDatasetIdOrDefault(), 
-                    translatedContent);
+                    mainMutation.Content);
             }
             catch (Exception ex)
             {
@@ -338,6 +440,48 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 throw new PluginApplicationException(
                     $"Translated document was created successfully (ID: {translatedDocumentId}), but failed to link it with the base document. Error: {ex.Message}", 
                     ex);
+            }
+        }
+    }
+
+    private void UpdateReferences(JObject content, Dictionary<string, string> idMapping)
+    {
+        if (idMapping.Count == 0)
+            return;
+
+        UpdateReferencesRecursive(content, idMapping);
+    }
+
+    private void UpdateReferencesRecursive(JToken token, Dictionary<string, string> idMapping)
+    {
+        if (token is JObject obj)
+        {
+            // Check if this is a reference object
+            if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)
+            {
+                var currentRefId = obj["_ref"]!.ToString();
+                
+                // Update reference if it exists in mapping
+                if (idMapping.TryGetValue(currentRefId, out var newRefId))
+                {
+                    obj["_ref"] = newRefId;
+                }
+            }
+            else
+            {
+                // Recursively process all properties
+                foreach (var property in obj.Properties().ToList())
+                {
+                    UpdateReferencesRecursive(property.Value, idMapping);
+                }
+            }
+        }
+        else if (token is JArray arr)
+        {
+            // Recursively process array items
+            foreach (var item in arr)
+            {
+                UpdateReferencesRecursive(item, idMapping);
             }
         }
     }
@@ -747,14 +891,17 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             if (objectsById.TryGetValue(id, out var entry))
             {
-                referencedEntries[id] = entry;
-                await CollectReferencesRecursivelyAsync(
-                    entry,
-                    datasetId,
-                    includeReferenceEntries,
-                    includeRichTextReferenceEntries,
-                    referencedEntries,
-                    referenceFieldNames);
+                if (entry["language"] != null)
+                {
+                    referencedEntries[id] = entry;
+                    await CollectReferencesRecursivelyAsync(
+                        entry,
+                        datasetId,
+                        includeReferenceEntries,
+                        includeRichTextReferenceEntries,
+                        referencedEntries,
+                        referenceFieldNames);
+                }
             }
         }
     }

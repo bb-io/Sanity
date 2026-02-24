@@ -1,3 +1,4 @@
+using Apps.Sanity.Models;
 using Apps.Sanity.Utils;
 using HtmlAgilityPack;
 using Newtonsoft.Json.Linq;
@@ -6,19 +7,59 @@ namespace Apps.Sanity.Converters;
 
 public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
 {
-    public List<JObject> ToJsonPatches(string html, JObject mainContent, string targetLanguage, bool publish,
+    public DocumentMutationResult ToJsonPatches(string html, JObject mainContent, string targetLanguage, bool publish,
         Dictionary<string, JObject>? referencedContents = null)
     {
         var mainContentId = HtmlHelper.ExtractContentId(html);
-        var patches = new List<JObject>();
+        var result = new DocumentMutationResult
+        {
+            Mutations = new List<DocumentMutation>(),
+            MainDocumentId = mainContentId
+        };
 
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
-        var contentRoot = doc.DocumentNode.SelectSingleNode($"//div[@data-content-id='{mainContentId}']");
+        // Process main document
+        var mainMutation = ProcessDocumentFromHtml(doc, mainContentId, targetLanguage, publish);
+        if (mainMutation != null)
+        {
+            result.Mutations.Add(mainMutation);
+        }
+
+        // Process referenced documents
+        var referencesSection = doc.DocumentNode.SelectSingleNode("//div[@id='blackbird-referenced-documents']");
+        if (referencesSection != null)
+        {
+            var referencedDocs = referencesSection.SelectNodes(".//div[@class='referenced-document']");
+            if (referencedDocs != null)
+            {
+                foreach (var refDocNode in referencedDocs)
+                {
+                    var refContentId = refDocNode.GetAttributeValue("data-content-id", null!);
+                    var originalRefId = refDocNode.GetAttributeValue("data-original-ref-id", null!);
+                    
+                    if (string.IsNullOrEmpty(refContentId) || string.IsNullOrEmpty(originalRefId))
+                        continue;
+
+                    var refMutation = ProcessReferencedDocumentFromHtml(doc, refDocNode, refContentId, originalRefId, targetLanguage, publish);
+                    if (refMutation != null)
+                    {
+                        result.Mutations.Add(refMutation);
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private DocumentMutation? ProcessDocumentFromHtml(HtmlDocument doc, string contentId, string targetLanguage, bool publish)
+    {
+        var contentRoot = doc.DocumentNode.SelectSingleNode($"//div[@data-content-id='{contentId}']");
         if (contentRoot == null)
         {
-            return patches;
+            return null;
         }
 
         // Extract original JSON from meta tag to preserve non-translatable fields
@@ -51,6 +92,100 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
             translatedContent = new JObject();
         }
 
+        UpdateContentFromHtmlNode(contentRoot, translatedContent);
+
+        if (translatedContent.HasValues)
+        {
+            // Handle draft/published ID conversion
+            if (translatedContent["_id"] != null)
+            {
+                var currentId = translatedContent["_id"]!.ToString();
+                
+                if (!publish && !currentId.StartsWith("drafts."))
+                {
+                    // Convert to draft ID if publish is false and not already a draft
+                    translatedContent["_id"] = $"drafts.{currentId}";
+                }
+                else if (publish && currentId.StartsWith("drafts."))
+                {
+                    // Convert to published ID if publish is true and currently a draft
+                    translatedContent["_id"] = currentId.Substring("drafts.".Length);
+                }
+            }
+            
+            translatedContent["language"] = targetLanguage;
+
+            // Remove GUID properties (expanded referenced documents) from final content
+            // They should not be saved as part of the main document
+            RemoveGuidProperties(translatedContent);
+
+            return new DocumentMutation
+            {
+                OriginalDocumentId = contentId,
+                TargetDocumentId = translatedContent["_id"]?.ToString() ?? contentId,
+                Content = translatedContent,
+                IsMainDocument = true,
+                ReferenceMapping = new Dictionary<string, string>()
+            };
+        }
+
+        return null;
+    }
+
+    private DocumentMutation? ProcessReferencedDocumentFromHtml(HtmlDocument doc, HtmlNode refDocNode, 
+        string refContentId, string originalRefId, string targetLanguage, bool publish)
+    {
+        // Extract original JSON from data attribute
+        var originalJsonBase64 = refDocNode.GetAttributeValue("data-original-json", null!);
+        if (string.IsNullOrEmpty(originalJsonBase64))
+        {
+            return null;
+        }
+
+        JObject translatedContent;
+        try
+        {
+            var originalJsonString = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(originalJsonBase64));
+            translatedContent = JObject.Parse(originalJsonString);
+        }
+        catch
+        {
+            return null;
+        }
+
+        UpdateContentFromHtmlNode(refDocNode, translatedContent);
+
+        if (translatedContent.HasValues)
+        {
+            // Generate new ID for localized version
+            var newRefId = Guid.NewGuid().ToString().Replace("-", "");
+            
+            // Handle draft/published ID conversion
+            var targetId = publish ? newRefId : $"drafts.{newRefId}";
+            translatedContent["_id"] = targetId;
+            translatedContent["language"] = targetLanguage;
+
+            // Remove GUID properties from referenced documents as well
+            RemoveGuidProperties(translatedContent);
+
+            return new DocumentMutation
+            {
+                OriginalDocumentId = originalRefId,
+                TargetDocumentId = targetId,
+                Content = translatedContent,
+                IsMainDocument = false,
+                ReferenceMapping = new Dictionary<string, string>
+                {
+                    { originalRefId, newRefId }
+                }
+            };
+        }
+
+        return null;
+    }
+
+    private void UpdateContentFromHtmlNode(HtmlNode contentRoot, JObject translatedContent)
+    {
         var richTextNodes = contentRoot.SelectNodes(".//*[@data-rich-text='true']");
         if (richTextNodes != null)
         {
@@ -86,32 +221,6 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 SetNestedProperty(translatedContent, dataJsonPath, newText);
             }
         }
-
-        if (translatedContent.HasValues)
-        {
-            // Handle draft/published ID conversion
-            if (translatedContent["_id"] != null)
-            {
-                var currentId = translatedContent["_id"]!.ToString();
-                
-                if (!publish && !currentId.StartsWith("drafts."))
-                {
-                    // Convert to draft ID if publish is false and not already a draft
-                    translatedContent["_id"] = $"drafts.{currentId}";
-                }
-                else if (publish && currentId.StartsWith("drafts."))
-                {
-                    // Convert to published ID if publish is true and currently a draft
-                    translatedContent["_id"] = currentId.Substring("drafts.".Length);
-                }
-            }
-            
-            translatedContent["language"] = targetLanguage;
-
-            patches.Add(translatedContent);
-        }
-
-        return patches;
     }
 
     private static JArray ConvertRichTextFromHtml(HtmlNode richTextNode, JArray? originalRichTextArray = null)
@@ -540,6 +649,35 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
             {
                 current[lastPart] = JToken.FromObject(value);
             }
+        }
+    }
+
+    /// <summary>
+    /// Check if property name is a GUID (expanded referenced document)
+    /// GUIDs are in format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    /// </summary>
+    private static bool IsGuidProperty(string propertyName)
+    {
+        if (string.IsNullOrEmpty(propertyName))
+            return false;
+
+        // GUID format: 8-4-4-4-12 characters separated by dashes
+        return Guid.TryParse(propertyName, out _);
+    }
+
+    /// <summary>
+    /// Remove all GUID properties from the document
+    /// These are expanded referenced documents that should not be saved
+    /// </summary>
+    private static void RemoveGuidProperties(JObject obj)
+    {
+        var guidProperties = obj.Properties()
+            .Where(p => IsGuidProperty(p.Name))
+            .ToList();
+
+        foreach (var prop in guidProperties)
+        {
+            obj.Remove(prop.Name);
         }
     }
 }
