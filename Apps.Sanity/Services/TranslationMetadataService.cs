@@ -19,6 +19,19 @@ public class TranslationMetadataService
         _creds = creds;
     }
 
+    public async Task<string?> GetBaseDocumentIdAsync(string documentId, string datasetId)
+    {
+        var query = $"*[_type == \"translation.metadata\" && references($id)][0]{{\"baseId\": translations[0].value->._id}}";
+        
+        var request = new ApiRequest($"/data/query/{datasetId}", Method.Get, _creds)
+            .AddQueryParameter("query", query)
+            .AddQueryParameter("$id", $"\"{documentId}\"");
+
+        var response = await _apiClient.ExecuteWithErrorHandling<SearchResponse<JObject>>(request);
+        
+        return response?.Result?["baseId"]?.ToString();
+    }
+
     public async Task<Dictionary<string, string>> GetTranslationsAsync(string baseDocumentId, string datasetId)
     {
         var query = $"*[_type == \"translation.metadata\" && references($id)][0]{{\"translations\": translations[].value->{{_id,language}}}}";

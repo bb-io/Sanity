@@ -307,15 +307,31 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             string localizedRefId;
             
+            // Find the base document ID (in case the referenced document is already a translation)
+            var baseRefDocId = await translationService.GetBaseDocumentIdAsync(
+                refMutation.OriginalDocumentId, 
+                request.GetDatasetIdOrDefault()) ?? refMutation.OriginalDocumentId;
+            
             // Check if this referenced document already has a translated version
             var existingRefTranslations = await translationService.GetTranslationsAsync(
-                refMutation.OriginalDocumentId, 
+                baseRefDocId, 
                 request.GetDatasetIdOrDefault());
 
             if (existingRefTranslations.TryGetValue(request.Locale, out var existingLocalizedRefId))
             {
                 // Update existing translated reference document
                 localizedRefId = existingLocalizedRefId;
+                
+                // Remove immutable/system fields before patching
+                var patchContent = (JObject)refMutation.Content.DeepClone();
+                patchContent.Remove("_id");
+                patchContent.Remove("_type");
+                patchContent.Remove("_rev");
+                patchContent.Remove("_createdAt");
+                patchContent.Remove("_updatedAt");
+                
+                // Ensure language field is set
+                patchContent["language"] = request.Locale;
                 
                 var patchMutation = new JObject
                 {
@@ -326,7 +342,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                             ["patch"] = new JObject
                             {
                                 ["id"] = localizedRefId,
-                                ["set"] = refMutation.Content
+                                ["set"] = patchContent
                             }
                         }
                     }
@@ -339,11 +355,38 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             }
             else
             {
+                // Get base referenced document for type and language
+                var baseRefDoc = await _draftHelper.GetContentWithDraftFallbackAsync(
+                    baseRefDocId, 
+                    request.GetDatasetIdOrDefault());
+                
+                if (baseRefDoc.Count == 0)
+                {
+                    throw new PluginApplicationException($"Base referenced document with ID '{baseRefDocId}' not found.");
+                }
+                
+                var baseRefLanguage = baseRefDoc.First()["language"]?.ToString() ?? baseLanguage;
+                var baseRefType = baseRefDoc.First()["_type"]?.ToString();
+                
+                // Prepare content for creation - remove immutable fields
+                var createContent = (JObject)refMutation.Content.DeepClone();
+                createContent.Remove("_id"); // Remove old _id, Sanity will generate new one
+                createContent.Remove("_rev");
+                createContent.Remove("_createdAt");
+                createContent.Remove("_updatedAt");
+                
+                // Set required fields for the translated referenced document
+                createContent["language"] = request.Locale;
+                if (!string.IsNullOrEmpty(baseRefType))
+                {
+                    createContent["_type"] = baseRefType;
+                }
+                
                 try
                 {
                     localizedRefId = await translationService.CreateTranslatedDocumentAsync(
                         request.GetDatasetIdOrDefault(), 
-                        refMutation.Content);
+                        createContent);
                 }
                 catch (Exception ex)
                 {
@@ -353,15 +396,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 // Link the translated reference with its base
                 try
                 {
-                    // Get base language for referenced document
-                    var baseRefDoc = await _draftHelper.GetContentWithDraftFallbackAsync(
-                        refMutation.OriginalDocumentId, 
-                        request.GetDatasetIdOrDefault());
-                    
-                    var baseRefLanguage = baseRefDoc.FirstOrDefault()?["language"]?.ToString() ?? baseLanguage;
-                    
                     await translationService.CreateOrUpdateTranslationMetadataAsync(
-                        refMutation.OriginalDocumentId, 
+                        baseRefDocId, 
                         localizedRefId, 
                         baseRefLanguage, 
                         request.Locale, 
@@ -390,6 +426,17 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             translatedDocumentId = existingTranslatedDocId;
             
+            // Remove immutable/system fields before patching
+            var patchContent = (JObject)mainMutation.Content.DeepClone();
+            patchContent.Remove("_id");
+            patchContent.Remove("_type");
+            patchContent.Remove("_rev");
+            patchContent.Remove("_createdAt");
+            patchContent.Remove("_updatedAt");
+            
+            // Ensure language field is set
+            patchContent["language"] = request.Locale;
+            
             var mutation = new JObject
             {
                 ["mutations"] = new JArray
@@ -399,7 +446,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                         ["patch"] = new JObject
                         {
                             ["id"] = translatedDocumentId,
-                            ["set"] = mainMutation.Content
+                            ["set"] = patchContent
                         }
                     }
                 }
@@ -412,14 +459,22 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
         else
         {
-            mainMutation.Content["_id"] = Guid.NewGuid().ToString();
-            mainMutation.Content["_type"] = baseDocument["_type"];
+            // Prepare content for creation - remove immutable/system fields
+            var createContent = (JObject)mainMutation.Content.DeepClone();
+            createContent.Remove("_id"); // Remove old _id
+            createContent.Remove("_rev");
+            createContent.Remove("_createdAt");
+            createContent.Remove("_updatedAt");
+            
+            // Set required fields
+            createContent["_type"] = baseDocument["_type"];
+            createContent["language"] = request.Locale;
             
             try
             {
                 translatedDocumentId = await translationService.CreateTranslatedDocumentAsync(
                     request.GetDatasetIdOrDefault(), 
-                    mainMutation.Content);
+                    createContent);
             }
             catch (Exception ex)
             {
