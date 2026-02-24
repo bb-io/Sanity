@@ -14,6 +14,15 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         "_createdAt", "_id", "_rev", "_type", "_updatedAt", "language", "_system"
     };
 
+    private class ConversionContext
+    {
+        public Dictionary<string, JObject> LocalizableReferences { get; set; } = new();
+        public AssetService AssetService { get; set; } = default!;
+        public string DatasetId { get; set; } = default!;
+        public List<FieldSizeRestriction>? FieldRestrictions { get; set; }
+        public Dictionary<string, JObject>? ReferencedEntries { get; set; }
+    }
+
     public async Task<string> ToHtmlAsync(JObject jObject, 
         string contentId, 
         string sourceLanguage, 
@@ -32,6 +41,16 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 allExcludedFields.Add(field);
             }
         }
+
+        // Track localizable referenced documents
+        var context = new ConversionContext
+        {
+            LocalizableReferences = new Dictionary<string, JObject>(),
+            AssetService = assetService,
+            DatasetId = datasetId,
+            FieldRestrictions = fieldRestrictions,
+            ReferencedEntries = referencedEntries
+        };
 
         var doc = new HtmlDocument();
 
@@ -56,6 +75,14 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         metaStrategy.SetAttributeValue("content", "DocumentLevel");
         headNode.AppendChild(metaStrategy);
 
+        // Store original JSON to preserve non-translatable fields
+        var metaOriginalJson = doc.CreateElement("meta");
+        metaOriginalJson.SetAttributeValue("name", "blackbird-original-json");
+        var originalJsonString = jObject.ToString(Newtonsoft.Json.Formatting.None);
+        var originalJsonBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(originalJsonString));
+        metaOriginalJson.SetAttributeValue("content", originalJsonBase64);
+        headNode.AppendChild(metaOriginalJson);
+
         var bodyNode = doc.CreateElement("body");
         htmlNode.AppendChild(bodyNode);
 
@@ -79,11 +106,53 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 continue;
             }
 
+            // Skip GUID properties (expanded referenced documents)
+            // They are already handled through referencedEntries
+            if (IsGuidProperty(propName))
+            {
+                continue;
+            }
+
             var propValue = property.Value;
-            var convertedNode = await ConvertTokenToHtml(doc, propValue, propName, assetService, datasetId, fieldRestrictions, referencedEntries);
+            var convertedNode = await ConvertTokenToHtml(doc, propValue, propName, context);
             if (convertedNode != null)
             {
                 mainContentDiv.AppendChild(convertedNode);
+            }
+        }
+
+        // Add referenced documents section at the end of body
+        if (context.LocalizableReferences.Any())
+        {
+            var referencesSection = doc.CreateElement("div");
+            referencesSection.SetAttributeValue("id", "blackbird-referenced-documents");
+            bodyNode.AppendChild(referencesSection);
+
+            foreach (var (refId, refContent) in context.LocalizableReferences)
+            {
+                var refDocDiv = doc.CreateElement("div");
+                refDocDiv.SetAttributeValue("data-content-id", refId);
+                refDocDiv.SetAttributeValue("data-original-ref-id", refId);
+                refDocDiv.SetAttributeValue("class", "referenced-document");
+                referencesSection.AppendChild(refDocDiv);
+
+                // Store original JSON of referenced document
+                var refJsonString = refContent.ToString(Newtonsoft.Json.Formatting.None);
+                var refJsonBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(refJsonString));
+                refDocDiv.SetAttributeValue("data-original-json", refJsonBase64);
+
+                foreach (var refProperty in refContent.Properties())
+                {
+                    if (allExcludedFields.Contains(refProperty.Name))
+                        continue;
+
+                    var refFieldPath = $"{refProperty.Name}";
+                    var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, context);
+                    if (refFieldNode != null)
+                    {
+                        refDocDiv.AppendChild(refFieldNode);
+                    }
+                }
             }
         }
 
@@ -105,10 +174,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     private static async Task<HtmlNode?> ConvertTokenToHtml(HtmlDocument doc, 
         JToken token, 
         string currentPath,
-        AssetService assetService, 
-        string datasetId, 
-        List<FieldSizeRestriction>? fieldRestrictions = null, 
-        Dictionary<string, JObject>? referencedEntries = null)
+        ConversionContext context)
     {
         if (token is JObject obj)
         {
@@ -120,7 +186,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 {
                     try
                     {
-                        var assetUrl = await assetService.GetAssetUrlAsync(datasetId, refId);
+                        var assetUrl = await context.AssetService.GetAssetUrlAsync(context.DatasetId, refId);
                         var imgElement = doc.CreateElement("img");
                         imgElement.SetAttributeValue("src", assetUrl);
                         imgElement.SetAttributeValue("data-json-path", currentPath);
@@ -143,21 +209,33 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                     referenceDiv.SetAttributeValue("data-json-path", currentPath);
                     referenceDiv.SetAttributeValue("data-ref-id", refId);
                     referenceDiv.SetAttributeValue("class", "reference");
-                    var refContent = referencedEntries != null && referencedEntries.ContainsKey(refId)
-                        ? referencedEntries[refId]
+                    
+                    var refContent = context.ReferencedEntries != null && context.ReferencedEntries.ContainsKey(refId)
+                        ? context.ReferencedEntries[refId]
                         : null;
                     
+                    // If reference has language, it's localizable - add to separate section
                     if(refContent != null && refContent["language"] != null)
                     {
+                        // Mark as localizable reference
+                        referenceDiv.SetAttributeValue("data-localizable-ref", "true");
                         
+                        // Add to localizable references collection
+                        if (!context.LocalizableReferences.ContainsKey(refId))
+                        {
+                            context.LocalizableReferences[refId] = refContent;
+                        }
+                    }
+                    else if (refContent != null)
+                    {
+                        // Non-localizable reference - include content inline (old behavior)
                         foreach (var refProperty in refContent.Properties())
                         {
                             if (DefaultExcludedFields.Contains(refProperty.Name))
                                 continue;
                             
                             var refFieldPath = $"{refId}.{refProperty.Name}";
-                            var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, 
-                                assetService, datasetId, fieldRestrictions, null);
+                            var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, context);
                             
                             if (refFieldNode != null)
                             {
@@ -170,11 +248,11 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 }
             }
 
-            return await ConvertObjectToHtml(doc, obj, currentPath, assetService, datasetId, fieldRestrictions, referencedEntries);
+            return await ConvertObjectToHtml(doc, obj, currentPath, context);
         }
         else if (token is JArray arr)
         {
-            return await ConvertArrayToHtml(doc, arr, currentPath, assetService, datasetId, fieldRestrictions, referencedEntries);
+            return await ConvertArrayToHtml(doc, arr, currentPath, context);
         }
         else if (token is JValue jValue)
         {
@@ -182,7 +260,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             {
                 var div = doc.CreateElement("div");
                 div.SetAttributeValue("data-json-path", currentPath);
-                ApplySizeRestriction(div, currentPath, fieldRestrictions);
+                ApplySizeRestriction(div, currentPath, context.FieldRestrictions);
                 div.AppendChild(doc.CreateTextNode(jValue.ToString()));
                 return div;
             }
@@ -193,15 +271,14 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     }
 
     private static async Task<HtmlNode?> ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath,
-        AssetService assetService, string datasetId, List<FieldSizeRestriction>? fieldRestrictions = null, 
-        Dictionary<string, JObject>? referencedEntries = null)
+        ConversionContext context)
     {
         var typeValue = obj["_type"]?.ToString();
         
         if (typeValue == "block" || (obj.ContainsKey("children") && obj.ContainsKey("markDefs")))
         {
             var parentArray = new JArray { obj };
-            var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(parentArray, doc, currentPath, assetService, datasetId);
+            var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(parentArray, doc, currentPath, context.AssetService, context.DatasetId);
             return richTextNode;
         }
 
@@ -214,7 +291,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 continue;
 
             string childPath = $"{currentPath}.{property.Name}";
-            var childNode = await ConvertTokenToHtml(doc, property.Value, childPath, assetService, datasetId, fieldRestrictions, referencedEntries);
+            var childNode = await ConvertTokenToHtml(doc, property.Value, childPath, context);
             if (childNode != null)
             {
                 hasChildren = true;
@@ -226,15 +303,14 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     }
 
     private static async Task<HtmlNode?> ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath,
-        AssetService assetService, string datasetId, List<FieldSizeRestriction>? fieldRestrictions = null, 
-        Dictionary<string, JObject>? referencedEntries = null)
+        ConversionContext context)
     {
         if (arr.Count > 0 && arr[0] is JObject firstItem)
         {
             var firstType = firstItem["_type"]?.ToString();
             if (firstType == "block" || (firstItem.ContainsKey("children") && firstItem.ContainsKey("markDefs")))
             {
-                var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(arr, doc, currentPath, assetService, datasetId);
+                var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(arr, doc, currentPath, context.AssetService, context.DatasetId);
                 return richTextNode;
             }
         }
@@ -245,7 +321,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         {
             var item = arr[i];
             string childPath = $"{currentPath}[{i}]";
-            var childNode = await ConvertTokenToHtml(doc, item, childPath, assetService, datasetId, fieldRestrictions, referencedEntries);
+            var childNode = await ConvertTokenToHtml(doc, item, childPath, context);
             if (childNode != null)
             {
                 hasChildren = true;
@@ -299,5 +375,34 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Check if property name is a GUID (expanded referenced document)
+    /// GUIDs are in format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    /// </summary>
+    private static bool IsGuidProperty(string propertyName)
+    {
+        if (string.IsNullOrEmpty(propertyName))
+            return false;
+
+        // GUID format: 8-4-4-4-12 characters separated by dashes
+        return Guid.TryParse(propertyName, out _);
+    }
+
+    /// <summary>
+    /// Remove all GUID properties from the document
+    /// These are expanded referenced documents that should not be saved
+    /// </summary>
+    private static void RemoveGuidProperties(JObject obj)
+    {
+        var guidProperties = obj.Properties()
+            .Where(p => IsGuidProperty(p.Name))
+            .ToList();
+
+        foreach (var prop in guidProperties)
+        {
+            obj.Remove(prop.Name);
+        }
     }
 }
