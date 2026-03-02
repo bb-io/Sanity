@@ -194,12 +194,23 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 var path = richTextNode.GetAttributeValue("data-json-path", null!);
                 if (string.IsNullOrEmpty(path)) continue;
 
-                // Get original rich text array from translatedContent to preserve marks
-                var originalRichTextArray = GetNestedProperty(translatedContent, path) as JArray;
+                // Get original value at this path to determine if it was an array or a single object
+                var originalValue = GetNestedProperty(translatedContent, path);
+                var originalRichTextArray = originalValue as JArray;
                 var richTextArray = ConvertRichTextFromHtml(richTextNode, originalRichTextArray);
                 if (richTextArray != null)
                 {
-                    SetNestedProperty(translatedContent, path, richTextArray);
+                    // If the original value was a single block object (not an array),
+                    // ConvertObjectToHtml wrapped it in [obj] for rich text processing.
+                    // We must unwrap it back to a single object to avoid an extra array layer.
+                    if (originalValue is JObject && richTextArray.Count > 0)
+                    {
+                        SetNestedProperty(translatedContent, path, richTextArray[0]);
+                    }
+                    else
+                    {
+                        SetNestedProperty(translatedContent, path, richTextArray);
+                    }
                 }
             }
         }
@@ -215,7 +226,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 var dataJsonPath = node.GetAttributeValue("data-json-path", null!);
                 if (dataJsonPath == null) continue;
 
-                var newText = node.InnerText.Trim();
+                var newText = ExtractTextPreservingLineBreaks(node);
                 if (string.IsNullOrEmpty(newText)) continue;
 
                 SetNestedProperty(translatedContent, dataJsonPath, newText);
@@ -331,6 +342,12 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
         {
             if (child is JObject childObj && childObj["_type"]?.ToString() == "span")
             {
+                var originalSpanText = childObj["text"]?.ToString() ?? "";
+                if (IsNewlineOnlyText(originalSpanText))
+                {
+                    continue;
+                }
+                
                 if (segmentIndex < textSegments.Count)
                 {
                     childObj["text"] = textSegments[segmentIndex];
@@ -342,8 +359,49 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
 
     private static string ExtractPlainText(HtmlNode element)
     {
-        var text = element.InnerText.Replace("\n", " ").Trim();
+        var text = ExtractTextPreservingLineBreaks(element);
         return System.Net.WebUtility.HtmlDecode(text);
+    }
+
+    /// <summary>
+    /// Extracts text from an HTML node, converting &lt;br&gt; elements back to \n characters.
+    /// This preserves newlines that were converted to &lt;br&gt; during JSON→HTML conversion.
+    /// </summary>
+    private static string ExtractTextPreservingLineBreaks(HtmlNode element)
+    {
+        var sb = new System.Text.StringBuilder();
+        ExtractTextPreservingLineBreaksRecursive(element, sb);
+        return sb.ToString().Trim();
+    }
+
+    private static void ExtractTextPreservingLineBreaksRecursive(HtmlNode node, System.Text.StringBuilder sb)
+    {
+        foreach (var child in node.ChildNodes)
+        {
+            if (child.NodeType == HtmlNodeType.Text)
+            {
+                sb.Append(System.Net.WebUtility.HtmlDecode(child.InnerText));
+            }
+            else if (child.NodeType == HtmlNodeType.Element)
+            {
+                if (child.Name.Equals("br", StringComparison.OrdinalIgnoreCase))
+                {
+                    sb.Append('\n');
+                }
+                else
+                {
+                    ExtractTextPreservingLineBreaksRecursive(child, sb);
+                }
+            }
+        }
+    }
+
+    private static bool IsNewlineOnlyText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return false;
+        
+        return string.IsNullOrEmpty(text.Replace("\n", "").Replace("\r", ""));
     }
 
     private static List<string> ExtractTextSegments(HtmlNode element)
@@ -370,7 +428,9 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 // Skip elements with data-mark attribute and recursively process their children
                 if (child.Name.ToLower() == "br")
                 {
-                    // Handle line breaks
+                    // Handle line breaks - append \n to previous segment.
+                    // Leading <br> elements (from newline-only spans) produce no segment;
+                    // those spans are skipped in UpdateBlockTextFromHtml via IsNewlineOnlyText.
                     if (segments.Count > 0)
                     {
                         segments[segments.Count - 1] += "\n";

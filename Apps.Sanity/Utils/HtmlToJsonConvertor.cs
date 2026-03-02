@@ -189,7 +189,7 @@ public static class HtmlToJsonConvertor
         foreach (var segment in segments)
         {
             var lang = ExtractLangKey(segment);
-            if (lang != null) return true;
+            if (lang != null && !int.TryParse(lang, out _)) return true;
         }
 
         return false;
@@ -303,22 +303,26 @@ public static class HtmlToJsonConvertor
 
     private static string GetArrayName(string[] segments)
     {
+        var pathParts = new List<string>();
         foreach (var s in segments)
         {
             var lang = ExtractLangKey(s);
-            if (lang != null)
+            if (lang != null && !int.TryParse(lang, out _))
             {
-                return s.Substring(0, s.IndexOf('['));
+                // This is the language-keyed segment; return the full path up to this array
+                pathParts.Add(s.Substring(0, s.IndexOf('[')));
+                return string.Join(".", pathParts);
             }
+            pathParts.Add(s);
         }
 
         return segments[0];
     }
 
-    private static string InferInternationalizedType(JObject current, string arrayName)
+    private static string InferInternationalizedType(JObject current, string arrayPath)
     {
-        var arr = current[arrayName] as JArray;
-        if (arr != null && arr.Count > 0 && arr[0] is JObject firstItem)
+        var token = ResolveTokenAtPath(current, arrayPath);
+        if (token is JArray arr && arr.Count > 0 && arr[0] is JObject firstItem)
         {
             var typeVal = firstItem["_type"]?.ToString();
             if (!string.IsNullOrEmpty(typeVal))
@@ -328,6 +332,46 @@ public static class HtmlToJsonConvertor
         }
 
         return "internationalizedArrayStringValue";
+    }
+
+    private static JToken? ResolveTokenAtPath(JObject root, string path)
+    {
+        var parts = path.Split('.');
+        JToken? current = root;
+
+        foreach (var part in parts)
+        {
+            if (current == null) return null;
+
+            int bracketIndex = part.IndexOf('[');
+            if (bracketIndex > 0 && part.EndsWith("]"))
+            {
+                var propName = part.Substring(0, bracketIndex);
+                var indexText = part.Substring(bracketIndex + 1, part.Length - bracketIndex - 2);
+
+                if (current is JObject obj)
+                {
+                    current = obj[propName];
+                }
+                else return null;
+
+                if (current is JArray arr && int.TryParse(indexText, out int idx) && idx < arr.Count)
+                {
+                    current = arr[idx];
+                }
+                else return null;
+            }
+            else
+            {
+                if (current is JObject obj)
+                {
+                    current = obj[part];
+                }
+                else return null;
+            }
+        }
+
+        return current;
     }
 
     private static void SetNestedProperty(JObject? obj, string propertyPath, string value)

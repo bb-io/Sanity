@@ -261,7 +261,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 var div = doc.CreateElement("div");
                 div.SetAttributeValue("data-json-path", currentPath);
                 ApplySizeRestriction(div, currentPath, context.FieldRestrictions);
-                div.AppendChild(doc.CreateTextNode(jValue.ToString()));
+                AppendTextWithLineBreaks(doc, div, jValue.ToString());
                 return div;
             }
             return null;
@@ -330,6 +330,22 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         }
 
         return hasChildren ? wrapperArr : null;
+    }
+    
+    private static void AppendTextWithLineBreaks(HtmlDocument doc, HtmlNode parent, string text)
+    {
+        var parts = text.Split('\n');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (parts[i].Length > 0)
+            {
+                parent.AppendChild(doc.CreateTextNode(parts[i]));
+            }
+            if (i < parts.Length - 1)
+            {
+                parent.AppendChild(doc.CreateElement("br"));
+            }
+        }
     }
 
     private static string EscapeHtml(string text)

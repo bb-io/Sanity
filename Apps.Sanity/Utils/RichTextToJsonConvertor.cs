@@ -61,26 +61,15 @@ public static class RichTextToJsonConvertor
     
     private static string ExtractContentType(JObject jObject, string basePath, string sourceLanguage)
     {
-        if (jObject[basePath] is JArray array)
+        var token = ResolveTokenAtPath(jObject, basePath);
+        if (token is JArray array)
         {
             foreach (var item in array)
             {
                 if (item is JObject obj && obj["_key"]?.ToString()?.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    if (obj["value"] is JArray valueArray && valueArray.Count > 0)
-                    {
-                        var firstElement = valueArray[0] as JObject;
-                        if (firstElement != null)
-                        {
-                            var objType = obj["_type"]?.ToString();
-                            return objType ?? "internationalizedArrayBlockContent";
-                        }
-                    }
-                    else
-                    {
-                        var objType = obj["_type"]?.ToString();
-                        return objType ?? "internationalizedArrayBlockContent";
-                    }
+                    var objType = obj["_type"]?.ToString();
+                    return objType ?? "internationalizedArrayBlockContent";
                 }
             }
         }
@@ -88,12 +77,73 @@ public static class RichTextToJsonConvertor
         return "internationalizedArrayBlockContent";
     }
     
+    private static JToken? ResolveTokenAtPath(JObject root, string path)
+    {
+        var parts = path.Split('.');
+        JToken? current = root;
+
+        foreach (var part in parts)
+        {
+            if (current == null) return null;
+
+            int bracketIndex = part.IndexOf('[');
+            if (bracketIndex > 0 && part.EndsWith("]"))
+            {
+                var propName = part.Substring(0, bracketIndex);
+                var indexText = part.Substring(bracketIndex + 1, part.Length - bracketIndex - 2);
+
+                if (current is JObject obj)
+                {
+                    current = obj[propName];
+                }
+                else return null;
+
+                if (current is JArray arr && int.TryParse(indexText, out int idx) && idx < arr.Count)
+                {
+                    current = arr[idx];
+                }
+                else return null;
+            }
+            else
+            {
+                if (current is JObject obj)
+                {
+                    current = obj[part];
+                }
+                else return null;
+            }
+        }
+
+        return current;
+    }
+    
     private static string ExtractBasePath(string jsonPath)
     {
-        var bracketIndex = jsonPath.IndexOf('[');
-        if (bracketIndex > 0)
+        // Split path into dot-separated segments and find the one with a non-numeric language key
+        var segments = jsonPath.Split('.');
+        var pathParts = new List<string>();
+
+        foreach (var segment in segments)
         {
-            return jsonPath.Substring(0, bracketIndex);
+            var bracketIndex = segment.IndexOf('[');
+            if (bracketIndex > 0 && segment.EndsWith("]"))
+            {
+                var indexText = segment.Substring(bracketIndex + 1, segment.Length - bracketIndex - 2);
+                if (!int.TryParse(indexText, out _))
+                {
+                    // This is the language key bracket — return full path up to this array name
+                    pathParts.Add(segment.Substring(0, bracketIndex));
+                    return string.Join(".", pathParts);
+                }
+            }
+            pathParts.Add(segment);
+        }
+
+        // Fallback: original behavior
+        var firstBracket = jsonPath.IndexOf('[');
+        if (firstBracket > 0)
+        {
+            return jsonPath.Substring(0, firstBracket);
         }
         
         return jsonPath;
@@ -101,7 +151,8 @@ public static class RichTextToJsonConvertor
     
     private static bool DoesTargetLanguageExist(JObject jObject, string basePath, string targetLanguage)
     {
-        if (jObject[basePath] is JArray array)
+        var token = ResolveTokenAtPath(jObject, basePath);
+        if (token is JArray array)
         {
             foreach (var item in array)
             {
