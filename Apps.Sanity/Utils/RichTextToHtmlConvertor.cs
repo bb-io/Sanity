@@ -106,7 +106,6 @@ public static class RichTextToHtmlConvertor
     private static void AppendSpanContent(JObject span, HtmlNode parentNode, HtmlDocument doc, JArray? markDefs)
     {
         var text = span["text"]?.ToString() ?? "";
-        text = text.Replace("\n", "<br/>");
         var marks = span["marks"] as JArray;
 
         if (string.IsNullOrEmpty(text))
@@ -118,67 +117,100 @@ public static class RichTextToHtmlConvertor
 
         if (marks == null || !marks.Any())
         {
-            parentNode.AppendChild(doc.CreateTextNode(text));
+            AppendTextWithBrElements(text, parentNode, doc);
             return;
         }
-        
-        HtmlNode formattedNode = doc.CreateTextNode(text);
-        foreach (var mark in marks)
+
+        // For marked spans, split on \n, wrap each part in marks, and insert <br> between them
+        var parts = text.Split('\n');
+        for (int partIdx = 0; partIdx < parts.Length; partIdx++)
         {
-            var markId = mark.ToString();
-            var markDef = markDefs?.FirstOrDefault(m => m["_key"]?.ToString() == markId);
-            
-            if (markDef != null)
+            if (partIdx > 0)
             {
-                var markType = markDef["_type"]?.ToString();
-                if (markType == "link")
+                parentNode.AppendChild(doc.CreateElement("br"));
+            }
+            
+            var partText = parts[partIdx];
+            if (string.IsNullOrEmpty(partText))
+                continue;
+
+            HtmlNode formattedNode = doc.CreateTextNode(partText);
+            foreach (var mark in marks)
+            {
+                var markId = mark.ToString();
+                var markDef = markDefs?.FirstOrDefault(m => m["_key"]?.ToString() == markId);
+            
+                if (markDef != null)
                 {
-                    var linkNode = doc.CreateElement("a");
-                    linkNode.SetAttributeValue("href", markDef["href"]?.ToString()!);
-                    linkNode.AppendChild(formattedNode);
-                    formattedNode = linkNode;
+                    var markType = markDef["_type"]?.ToString();
+                    if (markType == "link")
+                    {
+                        var linkNode = doc.CreateElement("a");
+                        linkNode.SetAttributeValue("href", markDef["href"]?.ToString()!);
+                        linkNode.AppendChild(formattedNode);
+                        formattedNode = linkNode;
+                    }
+                }
+                else
+                {
+                    switch (markId)
+                    {
+                        case "strong":
+                            var strongNode = doc.CreateElement("b");
+                            strongNode.AppendChild(formattedNode);
+                            formattedNode = strongNode;
+                            break;
+                        case "em":
+                            var emNode = doc.CreateElement("i");
+                            emNode.AppendChild(formattedNode);
+                            formattedNode = emNode;
+                            break;
+                        case "code":
+                            var codeNode = doc.CreateElement("code");
+                            codeNode.AppendChild(formattedNode);
+                            formattedNode = codeNode;
+                            break;
+                        case "underline":
+                            var underlineNode = doc.CreateElement("u");
+                            underlineNode.AppendChild(formattedNode);
+                            formattedNode = underlineNode;
+                            break;
+                        case "strike-through":
+                            var strikeNode = doc.CreateElement("s");
+                            strikeNode.AppendChild(formattedNode);
+                            formattedNode = strikeNode;
+                            break;
+                        default:
+                            var genericMarkNode = doc.CreateElement("span");
+                            genericMarkNode.SetAttributeValue("data-mark", markId);
+                            genericMarkNode.AppendChild(formattedNode);
+                            formattedNode = genericMarkNode;
+                            break;
+                    }
                 }
             }
-            else
+
+            parentNode.AppendChild(formattedNode);
+        }
+    }
+
+    /// <summary>
+    /// Appends text content to a parent node, converting \n to actual &lt;br&gt; elements.
+    /// </summary>
+    private static void AppendTextWithBrElements(string text, HtmlNode parentNode, HtmlDocument doc)
+    {
+        var parts = text.Split('\n');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (parts[i].Length > 0)
             {
-                switch (markId)
-                {
-                    case "strong":
-                        var strongNode = doc.CreateElement("b");
-                        strongNode.AppendChild(formattedNode);
-                        formattedNode = strongNode;
-                        break;
-                    case "em":
-                        var emNode = doc.CreateElement("i");
-                        emNode.AppendChild(formattedNode);
-                        formattedNode = emNode;
-                        break;
-                    case "code":
-                        var codeNode = doc.CreateElement("code");
-                        codeNode.AppendChild(formattedNode);
-                        formattedNode = codeNode;
-                        break;
-                    case "underline":
-                        var underlineNode = doc.CreateElement("u");
-                        underlineNode.AppendChild(formattedNode);
-                        formattedNode = underlineNode;
-                        break;
-                    case "strike-through":
-                        var strikeNode = doc.CreateElement("s");
-                        strikeNode.AppendChild(formattedNode);
-                        formattedNode = strikeNode;
-                        break;
-                    default:
-                        var genericMarkNode = doc.CreateElement("span");
-                        genericMarkNode.SetAttributeValue("data-mark", markId);
-                        genericMarkNode.AppendChild(formattedNode);
-                        formattedNode = genericMarkNode;
-                        break;
-                }
+                parentNode.AppendChild(doc.CreateTextNode(parts[i]));
+            }
+            if (i < parts.Length - 1)
+            {
+                parentNode.AppendChild(doc.CreateElement("br"));
             }
         }
-
-        parentNode.AppendChild(formattedNode);
     }
 
     private static HtmlNode ProcessImageBlock(JObject block, HtmlDocument doc, string blockPath, AssetService assetService, string datasetId)
