@@ -21,6 +21,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         public string DatasetId { get; set; } = default!;
         public List<FieldSizeRestriction>? FieldRestrictions { get; set; }
         public Dictionary<string, JObject>? ReferencedEntries { get; set; }
+        public HashSet<string> ExcludedFields { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<string> ToHtmlAsync(JObject jObject, 
@@ -49,7 +50,8 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             AssetService = assetService,
             DatasetId = datasetId,
             FieldRestrictions = fieldRestrictions,
-            ReferencedEntries = referencedEntries
+            ReferencedEntries = referencedEntries,
+            ExcludedFields = allExcludedFields
         };
 
         var doc = new HtmlDocument();
@@ -82,6 +84,15 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         var originalJsonBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(originalJsonString));
         metaOriginalJson.SetAttributeValue("content", originalJsonBase64);
         headNode.AppendChild(metaOriginalJson);
+
+        // Store excluded fields so upload side can also skip them
+        if (excludedFields != null && allExcludedFields.Except(DefaultExcludedFields).Any())
+        {
+            var metaExcludedFields = doc.CreateElement("meta");
+            metaExcludedFields.SetAttributeValue("name", "blackbird-excluded-fields");
+            metaExcludedFields.SetAttributeValue("content", string.Join(",", allExcludedFields.Except(DefaultExcludedFields)));
+            headNode.AppendChild(metaExcludedFields);
+        }
 
         var bodyNode = doc.CreateElement("body");
         htmlNode.AppendChild(bodyNode);
@@ -231,7 +242,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                         // Non-localizable reference - include content inline (old behavior)
                         foreach (var refProperty in refContent.Properties())
                         {
-                            if (DefaultExcludedFields.Contains(refProperty.Name))
+                            if (context.ExcludedFields.Contains(refProperty.Name))
                                 continue;
                             
                             var refFieldPath = $"{refId}.{refProperty.Name}";
@@ -288,6 +299,9 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         foreach (var property in obj.Properties())
         {
             if (property.Name.StartsWith("_"))
+                continue;
+
+            if (context.ExcludedFields.Contains(property.Name))
                 continue;
 
             string childPath = $"{currentPath}.{property.Name}";

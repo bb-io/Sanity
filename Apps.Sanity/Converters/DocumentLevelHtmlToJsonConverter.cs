@@ -20,8 +20,11 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
+        // Extract excluded fields from meta tag once, share with all processing
+        var excludedFieldNames = ExtractExcludedFieldNames(doc);
+
         // Process main document
-        var mainMutation = ProcessDocumentFromHtml(doc, mainContentId, targetLanguage, publish);
+        var mainMutation = ProcessDocumentFromHtml(doc, mainContentId, targetLanguage, publish, excludedFieldNames);
         if (mainMutation != null)
         {
             result.Mutations.Add(mainMutation);
@@ -42,7 +45,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                     if (string.IsNullOrEmpty(refContentId) || string.IsNullOrEmpty(originalRefId))
                         continue;
 
-                    var refMutation = ProcessReferencedDocumentFromHtml(doc, refDocNode, refContentId, originalRefId, targetLanguage, publish);
+                    var refMutation = ProcessReferencedDocumentFromHtml(doc, refDocNode, refContentId, originalRefId, targetLanguage, publish, excludedFieldNames);
                     if (refMutation != null)
                     {
                         result.Mutations.Add(refMutation);
@@ -54,7 +57,25 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
         return result;
     }
 
-    private DocumentMutation? ProcessDocumentFromHtml(HtmlDocument doc, string contentId, string targetLanguage, bool publish)
+    private static HashSet<string> ExtractExcludedFieldNames(HtmlDocument doc)
+    {
+        var excludedFieldNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var metaExcludedFields = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-excluded-fields']");
+        if (metaExcludedFields != null)
+        {
+            var excludedFieldsValue = metaExcludedFields.GetAttributeValue("content", null!);
+            if (!string.IsNullOrEmpty(excludedFieldsValue))
+            {
+                foreach (var field in excludedFieldsValue.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    excludedFieldNames.Add(field.Trim());
+                }
+            }
+        }
+        return excludedFieldNames;
+    }
+
+    private DocumentMutation? ProcessDocumentFromHtml(HtmlDocument doc, string contentId, string targetLanguage, bool publish, HashSet<string>? excludedFieldNames = null)
     {
         var contentRoot = doc.DocumentNode.SelectSingleNode($"//div[@data-content-id='{contentId}']");
         if (contentRoot == null)
@@ -92,7 +113,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
             translatedContent = new JObject();
         }
 
-        UpdateContentFromHtmlNode(contentRoot, translatedContent);
+        UpdateContentFromHtmlNode(contentRoot, translatedContent, excludedFieldNames);
 
         if (translatedContent.HasValues)
         {
@@ -133,7 +154,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
     }
 
     private DocumentMutation? ProcessReferencedDocumentFromHtml(HtmlDocument doc, HtmlNode refDocNode, 
-        string refContentId, string originalRefId, string targetLanguage, bool publish)
+        string refContentId, string originalRefId, string targetLanguage, bool publish, HashSet<string>? excludedFieldNames = null)
     {
         // Extract original JSON from data attribute
         var originalJsonBase64 = refDocNode.GetAttributeValue("data-original-json", null!);
@@ -153,7 +174,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
             return null;
         }
 
-        UpdateContentFromHtmlNode(refDocNode, translatedContent);
+        UpdateContentFromHtmlNode(refDocNode, translatedContent, excludedFieldNames);
 
         if (translatedContent.HasValues)
         {
@@ -184,7 +205,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
         return null;
     }
 
-    private void UpdateContentFromHtmlNode(HtmlNode contentRoot, JObject translatedContent)
+    private void UpdateContentFromHtmlNode(HtmlNode contentRoot, JObject translatedContent, HashSet<string>? excludedFieldNames = null)
     {
         var richTextNodes = contentRoot.SelectNodes(".//*[@data-rich-text='true']");
         if (richTextNodes != null)
@@ -193,6 +214,10 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
             {
                 var path = richTextNode.GetAttributeValue("data-json-path", null!);
                 if (string.IsNullOrEmpty(path)) continue;
+
+                // Skip if path ends with an excluded field name
+                if (excludedFieldNames != null && IsPathExcluded(path, excludedFieldNames))
+                    continue;
 
                 // Get original value at this path to determine if it was an array or a single object
                 var originalValue = GetNestedProperty(translatedContent, path);
@@ -226,12 +251,36 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 var dataJsonPath = node.GetAttributeValue("data-json-path", null!);
                 if (dataJsonPath == null) continue;
 
+                // Skip if path ends with an excluded field name
+                if (excludedFieldNames != null && IsPathExcluded(dataJsonPath, excludedFieldNames))
+                    continue;
+
                 var newText = ExtractTextPreservingLineBreaks(node);
                 if (string.IsNullOrEmpty(newText)) continue;
 
                 SetNestedProperty(translatedContent, dataJsonPath, newText);
             }
         }
+    }
+
+    /// <summary>
+    /// Checks whether a data-json-path refers to an excluded field.
+    /// Extracts the last property name from the path (e.g., "sections[0].colorTheme" → "colorTheme")
+    /// and checks if it's in the excluded set.
+    /// </summary>
+    private static bool IsPathExcluded(string path, HashSet<string> excludedFieldNames)
+    {
+        // Extract the last segment of the path (the field name)
+        // Examples: "colorTheme" → "colorTheme", "sections[0].colorTheme" → "colorTheme"
+        var lastDotIndex = path.LastIndexOf('.');
+        var fieldName = lastDotIndex >= 0 ? path.Substring(lastDotIndex + 1) : path;
+        
+        // Remove array index if present (e.g., "items[0]" → "items")
+        var bracketIndex = fieldName.IndexOf('[');
+        if (bracketIndex >= 0)
+            fieldName = fieldName.Substring(0, bracketIndex);
+        
+        return excludedFieldNames.Contains(fieldName);
     }
 
     private static JArray ConvertRichTextFromHtml(HtmlNode richTextNode, JArray? originalRichTextArray = null)
