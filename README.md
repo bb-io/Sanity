@@ -38,11 +38,16 @@ Before setting up the integration, ensure that you have access to a Sanity proje
   - **Localization strategy**: Choose between field-level (default) or document-level localization
   - **Source language**: Specify the source language code for the content
   - **Excluded fields**: List fields that should be excluded from the HTML output
-- **Upload content**: Update localizable content fields using an HTML file. Automatically detects the localization strategy from the HTML metadata.
+- **Upload content**: Update localizable content fields using an HTML file. Automatically detects the localization strategy from the HTML metadata and can optionally add the translated result into a Sanity Content Release.
 - **Create content**: Create a content object based on its type and parameters.
 - **Delete content**: Remove a content object from a dataset using its content identifier.
 - **Add reference to content**: Add a reference to another content object within a specific dataset.
 - **Remove reference from content**: Remove a reference to another content object within a specific dataset.
+- **Search releases**: Search content releases by name and state.
+- **Get release**: Retrieve a release by its name.
+- **Create release**: Create a new content release.
+- **Delete release**: Delete a release that Sanity allows to be deleted.
+- **List release documents**: Retrieve the documents that belong to a release.
 
 ## HTML conversion
 
@@ -78,6 +83,15 @@ When using document-level localization:
 - Select "Document level" as the localization strategy in the **Download content** action
 - The app will create separate documents for each target language during the **Upload content** action
 - Translation metadata documents are automatically created and maintained to link all language versions together
+- If a **Release name** is provided during upload, the translated documents and translation metadata are stored as release versions instead of being written directly to the live dataset
+
+## Content Releases
+
+The app supports Sanity Content Releases for release management and translation delivery into a release:
+
+- Use the **Releases** action list to search, inspect, create, delete, and inspect release documents
+- Use the **Release name** input on **Upload content** to write translated content into a release version
+- Release selection is limited to active or scheduled releases in the dropdown to help avoid targeting already published releases
 
 > If you need to translate regular content types (such as string or rich text blocks) without using one of these localization plugins, please contact us, and we will explore a solution.
 
@@ -103,7 +117,6 @@ You can direct which bird should start by setting custom webhook headers with na
 
 ## Limitations
 
-- The app works with the published content as of now. Please, contact us if you need support for working with document drafts.
 - In Sanity, localization is available through a plugin, which means the user will create their own content models by writing code (including locales). Since it's a plugin, it doesn't provide any API endpoints for directly retrieving locales or other information from the plugin.
 
 ```ts
