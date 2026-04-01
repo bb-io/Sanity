@@ -110,7 +110,7 @@ public class TranslationMetadataService
         }
     }
 
-    private async Task<JObject?> GetTranslationMetadataAsync(string baseDocumentId, string datasetId)
+    public async Task<JObject?> GetTranslationMetadataAsync(string baseDocumentId, string datasetId)
     {
         var query = $"*[_type == \"translation.metadata\" && references($id)][0]";
         
@@ -123,34 +123,20 @@ public class TranslationMetadataService
         return response?.Result;
     }
 
+    public async Task<JObject> BuildTranslationMetadataContentAsync(string baseDocumentId, string translatedDocumentId,
+        string baseLanguage, string targetLanguage, string datasetId)
+    {
+        var existingMetadata = await GetTranslationMetadataAsync(baseDocumentId, datasetId);
+        return existingMetadata == null
+            ? CreateNewTranslationMetadataContent(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage)
+            : UpdateExistingTranslationMetadataContent(existingMetadata, translatedDocumentId, targetLanguage);
+    }
+
     private async Task CreateTranslationMetadataAsync(string baseDocumentId, string translatedDocumentId,
         string baseLanguage, string targetLanguage, string datasetId)
     {
-        var metadata = new JObject
-        {
-            ["_type"] = "translation.metadata",
-            ["translations"] = new JArray
-            {
-                new JObject
-                {
-                    ["_key"] = baseLanguage,
-                    ["value"] = new JObject
-                    {
-                        ["_type"] = "reference",
-                        ["_ref"] = baseDocumentId
-                    }
-                },
-                new JObject
-                {
-                    ["_key"] = targetLanguage,
-                    ["value"] = new JObject
-                    {
-                        ["_type"] = "reference",
-                        ["_ref"] = translatedDocumentId
-                    }
-                }
-            }
-        };
+        var metadata = CreateNewTranslationMetadataContent(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage);
+        metadata.Remove("_id");
 
         var mutation = new JObject
         {
@@ -179,38 +165,8 @@ public class TranslationMetadataService
     private async Task UpdateTranslationMetadataAsync(JObject existingMetadata, string translatedDocumentId, 
         string targetLanguage, string datasetId)
     {
-        var metadataId = existingMetadata["_id"]?.ToString();
-        if (string.IsNullOrEmpty(metadataId))
-        {
-            throw new PluginApplicationException("Translation metadata ID is missing.");
-        }
-
-        var translations = existingMetadata["translations"] as JArray ?? new JArray();
-        
-        var existingTranslation = translations
-            .OfType<JObject>()
-            .FirstOrDefault(t => t["_key"]?.ToString() == targetLanguage);
-
-        if (existingTranslation != null)
-        {
-            existingTranslation["value"] = new JObject
-            {
-                ["_type"] = "reference",
-                ["_ref"] = translatedDocumentId
-            };
-        }
-        else
-        {
-            translations.Add(new JObject
-            {
-                ["_key"] = targetLanguage,
-                ["value"] = new JObject
-                {
-                    ["_type"] = "reference",
-                    ["_ref"] = translatedDocumentId
-                }
-            });
-        }
+        var metadata = UpdateExistingTranslationMetadataContent(existingMetadata, translatedDocumentId, targetLanguage);
+        var metadataId = metadata["_id"]?.ToString();
 
         var mutation = new JObject
         {
@@ -223,7 +179,7 @@ public class TranslationMetadataService
                         ["id"] = metadataId,
                         ["set"] = new JObject
                         {
-                            ["translations"] = translations
+                            ["translations"] = metadata["translations"]
                         }
                     }
                 }
@@ -241,6 +197,66 @@ public class TranslationMetadataService
         {
             throw new PluginApplicationException($"Failed to update translation metadata. Error: {ex.Message}", ex);
         }
+    }
+
+    private static JObject CreateNewTranslationMetadataContent(string baseDocumentId, string translatedDocumentId,
+        string baseLanguage, string targetLanguage)
+    {
+        return new JObject
+        {
+            ["_id"] = $"translation.metadata.{baseDocumentId}",
+            ["_type"] = "translation.metadata",
+            ["translations"] = new JArray
+            {
+                CreateTranslationReference(baseLanguage, baseDocumentId),
+                CreateTranslationReference(targetLanguage, translatedDocumentId)
+            }
+        };
+    }
+
+    private static JObject UpdateExistingTranslationMetadataContent(JObject existingMetadata, string translatedDocumentId,
+        string targetLanguage)
+    {
+        var metadata = (JObject)existingMetadata.DeepClone();
+        var metadataId = metadata["_id"]?.ToString();
+        if (string.IsNullOrEmpty(metadataId))
+        {
+            throw new PluginApplicationException("Translation metadata ID is missing.");
+        }
+
+        var translations = metadata["translations"] as JArray ?? new JArray();
+        var existingTranslation = translations
+            .OfType<JObject>()
+            .FirstOrDefault(t => t["_key"]?.ToString() == targetLanguage);
+
+        if (existingTranslation != null)
+        {
+            existingTranslation["value"] = new JObject
+            {
+                ["_type"] = "reference",
+                ["_ref"] = translatedDocumentId
+            };
+        }
+        else
+        {
+            translations.Add(CreateTranslationReference(targetLanguage, translatedDocumentId));
+        }
+
+        metadata["translations"] = translations;
+        return metadata;
+    }
+
+    private static JObject CreateTranslationReference(string language, string documentId)
+    {
+        return new JObject
+        {
+            ["_key"] = language,
+            ["value"] = new JObject
+            {
+                ["_type"] = "reference",
+                ["_ref"] = documentId
+            }
+        };
     }
 }
 

@@ -31,6 +31,8 @@ namespace Apps.Sanity.Actions;
 public class ContentActions(InvocationContext invocationContext, IFileManagementClient fileManagementClient) : AppInvocable(invocationContext)
 {
     private readonly DraftContentHelper _draftHelper = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
+    private readonly ReleaseService _releaseService = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
+
     [Action("Search content",
         Description =
             "Search for content within a specific dataset. If no dataset is specified, the production dataset is used by default.")]
@@ -145,6 +147,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     [BlueprintActionDefinition(BlueprintAction.UploadContent)]
     public async Task UpdateContentFromHtmlAsync([ActionParameter] UpdateContentFromHtmlRequest request)
     {
+        ValidateUploadRequest(request);
+
         var file = await fileManagementClient.DownloadAsync(request.Content);
         var bytes = await file.GetByteData();
         var html = Encoding.Default.GetString(bytes);
@@ -160,7 +164,18 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var contentId = request.ContentId ?? HtmlHelper.ExtractContentId(html);
         var localizationStrategy = HtmlHelper.ExtractLocalizationStrategy(html);
 
-        if (localizationStrategy == LocalizationStrategy.DocumentLevel)
+        if (!string.IsNullOrWhiteSpace(request.ReleaseName))
+        {
+            if (localizationStrategy == LocalizationStrategy.DocumentLevel)
+            {
+                await UpdateContentDocumentLevelInReleaseAsync(request, html, contentId);
+            }
+            else
+            {
+                await UpdateContentFieldLevelInReleaseAsync(request, html, contentId);
+            }
+        }
+        else if (localizationStrategy == LocalizationStrategy.DocumentLevel)
         {
             await UpdateContentDocumentLevelAsync(request, html, contentId);
         }
@@ -257,6 +272,153 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             throw new PluginApplicationException(
                 "An unexpected error occurred while updating the content. Please contact support for further assistance.");
         }
+    }
+
+    private async Task UpdateContentFieldLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string contentId)
+    {
+        var doc = new HtmlDocument();
+        doc.LoadHtml(html);
+
+        var datasetId = request.GetDatasetIdOrDefault();
+        var releaseName = request.ReleaseName!;
+        var publishedContentId = ReleaseContentHelper.GetPublishedId(contentId);
+        var mainContent = await GetPublishedContentAsync(publishedContentId, datasetId);
+
+        var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc)
+            .Select(ReleaseContentHelper.GetPublishedId)
+            .Distinct()
+            .ToList();
+
+        var referencedContents = await GetPublishedContentsByIdAsync(datasetId, referencedContentIds);
+
+        await _releaseService.CreateOrReplaceReleaseVersionsAsync(
+            datasetId,
+            releaseName,
+            new[] { mainContent }.Concat(referencedContents.Values));
+
+        var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.FieldLevel);
+        var mutationResult = converter.ToJsonPatches(html, mainContent, request.Locale, true, referencedContents);
+
+        var releasePatches = new List<JObject>();
+        if (mutationResult.Mutations.Any()
+            && mutationResult.Mutations.First().Content["fieldLevelPatches"] is JArray patchArray)
+        {
+            releasePatches = patchArray
+                .OfType<JObject>()
+                .Select(x => RetargetPatchToRelease(x, releaseName))
+                .ToList();
+        }
+
+        if (!releasePatches.Any())
+        {
+            return;
+        }
+
+        var apiRequest = new ApiRequest($"/data/mutate/{datasetId}", Method.Post, Creds)
+            .AddStringBody(new JObject
+            {
+                ["mutations"] = new JArray(releasePatches)
+            }.ToString(), ContentType.Json);
+
+        var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
+        if (string.IsNullOrEmpty(transaction.TransactionId))
+        {
+            throw new PluginApplicationException(
+                "An unexpected error occurred while updating the release content. Please contact support for further assistance.");
+        }
+    }
+
+    private async Task UpdateContentDocumentLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
+    {
+        var datasetId = request.GetDatasetIdOrDefault();
+        var releaseName = request.ReleaseName!;
+        var translationService = new TranslationMetadataService(Client, Creds);
+
+        var basePublishedDocumentId = ReleaseContentHelper.GetPublishedId(baseDocumentId);
+        var baseDocument = await GetPublishedContentAsync(basePublishedDocumentId, datasetId);
+        var baseLanguage = baseDocument["language"]?.ToString();
+
+        if (string.IsNullOrEmpty(baseLanguage))
+        {
+            throw new PluginMisconfigurationException(
+                "Base document does not have a language field. Document level localization requires a 'language' field.");
+        }
+
+        var existingTranslations = await translationService.GetTranslationsAsync(basePublishedDocumentId, datasetId);
+        var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.DocumentLevel);
+        var mutationResult = converter.ToJsonPatches(html, baseDocument, request.Locale, true, null);
+
+        if (mutationResult.Mutations.Count == 0)
+        {
+            throw new PluginApplicationException("No translated content could be extracted from the HTML file.");
+        }
+
+        var mainMutation = mutationResult.Mutations.FirstOrDefault(m => m.IsMainDocument);
+        if (mainMutation == null)
+        {
+            throw new PluginApplicationException("Main document mutation not found in the result.");
+        }
+
+        var idMapping = new Dictionary<string, string>();
+
+        foreach (var refMutation in mutationResult.Mutations.Where(m => !m.IsMainDocument))
+        {
+            var originalReferenceId = ReleaseContentHelper.GetPublishedId(refMutation.OriginalDocumentId);
+            var baseReferenceDocumentId = await translationService.GetBaseDocumentIdAsync(originalReferenceId, datasetId)
+                ?? originalReferenceId;
+
+            var existingReferenceTranslations = await translationService.GetTranslationsAsync(baseReferenceDocumentId, datasetId);
+            var localizedReferenceId = existingReferenceTranslations.TryGetValue(request.Locale, out var existingLocalizedRefId)
+                ? existingLocalizedRefId
+                : ReleaseContentHelper.GetPublishedId(refMutation.TargetDocumentId ?? originalReferenceId);
+
+            var baseReferenceDocument = await GetPublishedContentAsync(baseReferenceDocumentId, datasetId);
+            var localizedReferenceContent = PrepareLocalizedDocumentForRelease(
+                refMutation.Content,
+                localizedReferenceId,
+                request.Locale,
+                baseReferenceDocument["_type"]?.ToString());
+
+            await _releaseService.CreateOrReplaceReleaseVersionAsync(datasetId, releaseName, localizedReferenceContent);
+
+            var baseReferenceLanguage = baseReferenceDocument["language"]?.ToString() ?? baseLanguage;
+            var referenceMetadataContent = await translationService.BuildTranslationMetadataContentAsync(
+                baseReferenceDocumentId,
+                localizedReferenceId,
+                baseReferenceLanguage,
+                request.Locale,
+                datasetId);
+
+            await _releaseService.CreateOrReplaceReleaseVersionAsync(datasetId, releaseName, referenceMetadataContent);
+
+            foreach (var mapping in refMutation.ReferenceMapping)
+            {
+                idMapping[mapping.Key] = localizedReferenceId;
+            }
+        }
+
+        UpdateReferences(mainMutation.Content, idMapping);
+
+        var translatedDocumentId = existingTranslations.TryGetValue(request.Locale, out var existingTranslatedDocId)
+            ? existingTranslatedDocId
+            : ReleaseContentHelper.GetPublishedId(mainMutation.TargetDocumentId ?? basePublishedDocumentId);
+
+        var localizedMainContent = PrepareLocalizedDocumentForRelease(
+            mainMutation.Content,
+            translatedDocumentId,
+            request.Locale,
+            baseDocument["_type"]?.ToString());
+
+        await _releaseService.CreateOrReplaceReleaseVersionAsync(datasetId, releaseName, localizedMainContent);
+
+        var mainMetadataContent = await translationService.BuildTranslationMetadataContentAsync(
+            basePublishedDocumentId,
+            translatedDocumentId,
+            baseLanguage,
+            request.Locale,
+            datasetId);
+
+        await _releaseService.CreateOrReplaceReleaseVersionAsync(datasetId, releaseName, mainMetadataContent);
     }
 
     private async Task UpdateContentDocumentLevelAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
@@ -860,6 +1022,88 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
         
         return result;
+    }
+
+    private static void ValidateUploadRequest(UpdateContentFromHtmlRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.ReleaseName) && request.Publish == true)
+        {
+            throw new PluginMisconfigurationException(
+                "Publish after update cannot be used together with Release name. Choose either direct publishing or saving the translation into a release.");
+        }
+    }
+
+    private async Task<JObject> GetPublishedContentAsync(string contentId, string datasetId)
+    {
+        var publishedId = ReleaseContentHelper.GetPublishedId(contentId);
+        var result = await SearchContentAsJObjectAsync(new SearchContentRequest
+        {
+            DatasetId = datasetId,
+            GroqQuery = $"_id == \"{publishedId}\""
+        });
+
+        if (result.Count == 0)
+        {
+            throw new PluginMisconfigurationException(
+                $"No published content found for ID '{publishedId}'. Please verify that the content exists before adding it to a release.");
+        }
+
+        return result.First();
+    }
+
+    private async Task<Dictionary<string, JObject>> GetPublishedContentsByIdAsync(string datasetId, IEnumerable<string> contentIds)
+    {
+        var publishedIds = contentIds
+            .Select(ReleaseContentHelper.GetPublishedId)
+            .Distinct()
+            .ToList();
+
+        if (!publishedIds.Any())
+        {
+            return new Dictionary<string, JObject>();
+        }
+
+        var idConditions = string.Join(" || ", publishedIds.Select(id => $"_id == \"{id}\""));
+        var entries = await SearchContentAsJObjectAsync(new SearchContentRequest
+        {
+            DatasetId = datasetId,
+            GroqQuery = idConditions
+        });
+
+        return entries
+            .Where(entry => entry["_id"] != null)
+            .ToDictionary(entry => entry["_id"]!.ToString());
+    }
+
+    private static JObject RetargetPatchToRelease(JObject patch, string releaseName)
+    {
+        var releasePatch = (JObject)patch.DeepClone();
+        var patchId = releasePatch["patch"]?["id"]?.ToString();
+        if (!string.IsNullOrWhiteSpace(patchId))
+        {
+            releasePatch["patch"]!["id"] = ReleaseContentHelper.BuildVersionId(releaseName, patchId);
+        }
+
+        return releasePatch;
+    }
+
+    private static JObject PrepareLocalizedDocumentForRelease(JObject content, string publishedDocumentId,
+        string targetLanguage, string? documentType)
+    {
+        var releaseContent = (JObject)content.DeepClone();
+        releaseContent["_id"] = ReleaseContentHelper.GetPublishedId(publishedDocumentId);
+        releaseContent["language"] = targetLanguage;
+
+        if (!string.IsNullOrWhiteSpace(documentType))
+        {
+            releaseContent["_type"] = documentType;
+        }
+
+        releaseContent.Remove("_rev");
+        releaseContent.Remove("_createdAt");
+        releaseContent.Remove("_updatedAt");
+
+        return releaseContent;
     }
     
     private async Task EnsureDraftExistsAsync(DatasetIdentifier datasetIdentifier, string contentId, JObject publishedContent)

@@ -16,6 +16,9 @@ public class UpdateContentFromHtmlRequest : DatasetIdentifier, IUploadContentInp
     
     [Display("Content ID"), DataSource(typeof(ContentDataHandler))]
     public string? ContentId { get; set; }
+
+    [Display("Release name", Description = "If specified, the translated content is added to the selected release instead of being written directly to the live document."), DataSource(typeof(ReleaseDataHandler))]
+    public string? ReleaseName { get; set; }
     
     [Display("Publish after update")]
     public bool? Publish { get; set; }
