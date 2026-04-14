@@ -9,6 +9,22 @@ public static class ReleaseContentHelper
         return !string.IsNullOrWhiteSpace(contentId) && contentId.StartsWith(VersionsPrefix, StringComparison.Ordinal);
     }
 
+    public static string? GetReleaseName(string contentId)
+    {
+        if (!IsVersionId(contentId))
+        {
+            return null;
+        }
+
+        var releaseSeparatorIndex = contentId.IndexOf('.', VersionsPrefix.Length);
+        if (releaseSeparatorIndex < 0)
+        {
+            return string.Empty;
+        }
+
+        return contentId[VersionsPrefix.Length..releaseSeparatorIndex];
+    }
+
     public static string BuildVersionId(string releaseName, string contentId)
     {
         var publishedId = GetPublishedId(contentId);
@@ -26,7 +42,7 @@ public static class ReleaseContentHelper
         {
             return contentId["drafts.".Length..];
         }
-
+        
         if (!contentId.StartsWith(VersionsPrefix, StringComparison.Ordinal))
         {
             return contentId;

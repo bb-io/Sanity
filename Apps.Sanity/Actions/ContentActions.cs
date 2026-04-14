@@ -20,6 +20,7 @@ using Blackbird.Applications.Sdk.Utils.Extensions.Files;
 using Blackbird.Applications.Sdk.Utils.Extensions.Http;
 using Blackbird.Filters.Transformations;
 using Blackbird.Filters.Xliff.Xliff2;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RestSharp;
 using HtmlAgilityPack;
@@ -163,6 +164,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         var contentId = request.ContentId ?? HtmlHelper.ExtractContentId(html);
         var localizationStrategy = HtmlHelper.ExtractLocalizationStrategy(html);
+        request.ReleaseName ??= ReleaseContentHelper.GetReleaseName(contentId);
 
         if (!string.IsNullOrWhiteSpace(request.ReleaseName))
         {
@@ -281,15 +283,13 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         var datasetId = request.GetDatasetIdOrDefault();
         var releaseName = request.ReleaseName!;
-        var publishedContentId = ReleaseContentHelper.GetPublishedId(contentId);
-        var mainContent = await GetPublishedContentAsync(publishedContentId, datasetId);
+        var mainContent = await GetReleaseAwareContentAsync(contentId, datasetId);
 
         var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc)
-            .Select(ReleaseContentHelper.GetPublishedId)
             .Distinct()
             .ToList();
 
-        var referencedContents = await GetPublishedContentsByIdAsync(datasetId, referencedContentIds);
+        var referencedContents = await GetReleaseAwareContentsByIdAsync(datasetId, referencedContentIds);
 
         await _releaseService.CreateOrReplaceReleaseVersionsAsync(
             datasetId,
@@ -335,7 +335,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var translationService = new TranslationMetadataService(Client, Creds);
 
         var basePublishedDocumentId = ReleaseContentHelper.GetPublishedId(baseDocumentId);
-        var baseDocument = await GetPublishedContentAsync(basePublishedDocumentId, datasetId);
+        var baseDocument = await GetReleaseAwareContentAsync(baseDocumentId, datasetId);
         var baseLanguage = baseDocument["language"]?.ToString();
 
         if (string.IsNullOrEmpty(baseLanguage))
@@ -360,6 +360,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var idMapping = new Dictionary<string, string>();
+        var releaseDocuments = new List<JObject>();
 
         foreach (var refMutation in mutationResult.Mutations.Where(m => !m.IsMainDocument))
         {
@@ -370,16 +371,19 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             var existingReferenceTranslations = await translationService.GetTranslationsAsync(baseReferenceDocumentId, datasetId);
             var localizedReferenceId = existingReferenceTranslations.TryGetValue(request.Locale, out var existingLocalizedRefId)
                 ? existingLocalizedRefId
-                : ReleaseContentHelper.GetPublishedId(refMutation.TargetDocumentId ?? originalReferenceId);
+                : ReleaseContentHelper.GetPublishedId(refMutation.TargetDocumentId ?? GenerateLocalizedDocumentId());
 
-            var baseReferenceDocument = await GetPublishedContentAsync(baseReferenceDocumentId, datasetId);
+            var referenceLookupId = ReleaseContentHelper.IsVersionId(refMutation.OriginalDocumentId)
+                ? refMutation.OriginalDocumentId
+                : baseReferenceDocumentId;
+            var baseReferenceDocument = await GetReleaseAwareContentAsync(referenceLookupId, datasetId);
             var localizedReferenceContent = PrepareLocalizedDocumentForRelease(
                 refMutation.Content,
                 localizedReferenceId,
                 request.Locale,
                 baseReferenceDocument["_type"]?.ToString());
 
-            await _releaseService.CreateOrReplaceReleaseVersionAsync(datasetId, releaseName, localizedReferenceContent);
+            releaseDocuments.Add(localizedReferenceContent);
 
             var baseReferenceLanguage = baseReferenceDocument["language"]?.ToString() ?? baseLanguage;
             var referenceMetadataContent = await translationService.BuildTranslationMetadataContentAsync(
@@ -389,7 +393,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 request.Locale,
                 datasetId);
 
-            await _releaseService.CreateOrReplaceReleaseVersionAsync(datasetId, releaseName, referenceMetadataContent);
+            releaseDocuments.Add(referenceMetadataContent);
 
             foreach (var mapping in refMutation.ReferenceMapping)
             {
@@ -401,7 +405,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         var translatedDocumentId = existingTranslations.TryGetValue(request.Locale, out var existingTranslatedDocId)
             ? existingTranslatedDocId
-            : ReleaseContentHelper.GetPublishedId(mainMutation.TargetDocumentId ?? basePublishedDocumentId);
+            : GenerateLocalizedDocumentId();
 
         var localizedMainContent = PrepareLocalizedDocumentForRelease(
             mainMutation.Content,
@@ -409,7 +413,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             request.Locale,
             baseDocument["_type"]?.ToString());
 
-        await _releaseService.CreateOrReplaceReleaseVersionAsync(datasetId, releaseName, localizedMainContent);
+        releaseDocuments.Add(localizedMainContent);
 
         var mainMetadataContent = await translationService.BuildTranslationMetadataContentAsync(
             basePublishedDocumentId,
@@ -418,7 +422,9 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             request.Locale,
             datasetId);
 
-        await _releaseService.CreateOrReplaceReleaseVersionAsync(datasetId, releaseName, mainMetadataContent);
+        releaseDocuments.Add(mainMetadataContent);
+
+        await _releaseService.CreateOrReplaceReleaseVersionsAsync(datasetId, releaseName, releaseDocuments);
     }
 
     private async Task UpdateContentDocumentLevelAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
@@ -1005,15 +1011,15 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         // If searching for a single draft ID and nothing found, try the published version
         if (result.Count == 0 && identifier.GroqQuery != null && identifier.GroqQuery.Contains("_id =="))
         {
-            var idMatch = System.Text.RegularExpressions.Regex.Match(identifier.GroqQuery, @"_id == \""(drafts\.[^\""]+)\""");
-            if (idMatch.Success)
+            var exactIds = ContentIdQueryHelper.ExtractExactContentIds(identifier.GroqQuery);
+            if (exactIds.Count == 1 && exactIds[0].StartsWith("drafts.", StringComparison.Ordinal))
             {
-                var draftId = idMatch.Groups[1].Value;
+                var draftId = exactIds[0];
                 var publishedId = DraftContentHelper.GetPublishedId(draftId);
                 var newRequest = new SearchContentRequest
                 {
                     DatasetId = identifier.GetDatasetIdOrDefault(),
-                    GroqQuery = $"_id == \"{publishedId}\"",
+                    GroqQuery = $"_id == {JsonConvert.SerializeObject(publishedId)}",
                     ReturnDrafts = false
                 };
                 result = await SearchContentInternalAsync<JObject>(newRequest);
@@ -1033,37 +1039,73 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
     }
 
-    private async Task<JObject> GetPublishedContentAsync(string contentId, string datasetId)
+    private async Task<JObject> GetReleaseAwareContentAsync(string contentId, string datasetId)
     {
-        var publishedId = ReleaseContentHelper.GetPublishedId(contentId);
-        var result = await SearchContentAsJObjectAsync(new SearchContentRequest
+        var entries = await GetReleaseAwareContentsByIdAsync(datasetId, [contentId]);
+        if (!entries.TryGetValue(contentId, out var entry))
         {
-            DatasetId = datasetId,
-            GroqQuery = $"_id == \"{publishedId}\""
-        });
-
-        if (result.Count == 0)
-        {
+            var publishedId = ReleaseContentHelper.GetPublishedId(contentId);
             throw new PluginMisconfigurationException(
-                $"No published content found for ID '{publishedId}'. Please verify that the content exists before adding it to a release.");
+                $"No content found for ID '{contentId}' or its published counterpart '{publishedId}'. Please verify that the content exists before adding it to a release.");
         }
 
-        return result.First();
+        return entry;
     }
 
-    private async Task<Dictionary<string, JObject>> GetPublishedContentsByIdAsync(string datasetId, IEnumerable<string> contentIds)
+    private async Task<Dictionary<string, JObject>> GetReleaseAwareContentsByIdAsync(string datasetId, IEnumerable<string> contentIds)
     {
-        var publishedIds = contentIds
-            .Select(ReleaseContentHelper.GetPublishedId)
+        var requestedIds = contentIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct()
             .ToList();
 
-        if (!publishedIds.Any())
+        if (!requestedIds.Any())
         {
             return new Dictionary<string, JObject>();
         }
 
-        var idConditions = string.Join(" || ", publishedIds.Select(id => $"_id == \"{id}\""));
+        var resolvedEntries = await GetContentsByExactIdsAsync(datasetId, requestedIds);
+
+        var fallbackPublishedIds = requestedIds
+            .Where(id => !resolvedEntries.ContainsKey(id))
+            .Select(id => new
+            {
+                RequestedId = id,
+                PublishedId = ReleaseContentHelper.GetPublishedId(id)
+            })
+            .Where(x => !string.Equals(x.RequestedId, x.PublishedId, StringComparison.Ordinal))
+            .ToList();
+
+        if (!fallbackPublishedIds.Any())
+        {
+            return resolvedEntries;
+        }
+
+        var fallbackEntries = await GetContentsByExactIdsAsync(datasetId, fallbackPublishedIds.Select(x => x.PublishedId));
+        foreach (var fallback in fallbackPublishedIds)
+        {
+            if (fallbackEntries.TryGetValue(fallback.PublishedId, out var entry))
+            {
+                resolvedEntries[fallback.RequestedId] = entry;
+            }
+        }
+
+        return resolvedEntries;
+    }
+
+    private async Task<Dictionary<string, JObject>> GetContentsByExactIdsAsync(string datasetId, IEnumerable<string> contentIds)
+    {
+        var ids = contentIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct()
+            .ToList();
+
+        if (!ids.Any())
+        {
+            return new Dictionary<string, JObject>();
+        }
+
+        var idConditions = string.Join(" || ", ids.Select(id => $"_id == {JsonConvert.SerializeObject(id)}"));
         var entries = await SearchContentAsJObjectAsync(new SearchContentRequest
         {
             DatasetId = datasetId,
@@ -1072,7 +1114,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         return entries
             .Where(entry => entry["_id"] != null)
-            .ToDictionary(entry => entry["_id"]!.ToString());
+            .ToDictionary(entry => entry["_id"]!.ToString(), StringComparer.Ordinal);
     }
 
     private static JObject RetargetPatchToRelease(JObject patch, string releaseName)
@@ -1104,6 +1146,11 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         releaseContent.Remove("_updatedAt");
 
         return releaseContent;
+    }
+
+    private static string GenerateLocalizedDocumentId()
+    {
+        return Guid.NewGuid().ToString("N");
     }
     
     private async Task EnsureDraftExistsAsync(DatasetIdentifier datasetIdentifier, string contentId, JObject publishedContent)
@@ -1151,7 +1198,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     {
         var endpoint = $"/data/query/{identifier}{identifier.BuildGroqQuery()} | order(_createdAt desc)";
         var request = new ApiRequest(endpoint, Method.Get, Creds);
-        if(identifier.ReturnDrafts == true)
+        if (ContentIdQueryHelper.RequiresRawPerspective(identifier.GroqQuery, identifier.ReturnDrafts == true))
         {
             request.AddParameter("perspective", "raw");
         }
