@@ -26,9 +26,10 @@ public class DraftContentHelper
         string? datasetId)
     {
         var isDraftId = contentId.StartsWith("drafts.");
-        var groqQuery = $"_id == \"{contentId}\"";
+        var isVersionId = contentId.StartsWith("versions.");
         
-        var result = await SearchContentInternalAsync<JObject>(datasetId, groqQuery, isDraftId);
+        var groqQuery = $"_id == \"{contentId}\"";
+        var result = await SearchContentInternalAsync<JObject>(datasetId, groqQuery, isDraftId, isVersionId);
         result = result.Where(x => !x["_type"]!.ToString().Contains("system")).ToList();
         if (result.Count == 0 && isDraftId)
         {
@@ -92,13 +93,13 @@ public class DraftContentHelper
         return draftResult.First();
     }
     
-    private async Task<List<T>> SearchContentInternalAsync<T>(string? datasetId, string groqQuery, bool returnDrafts)
+    private async Task<List<T>> SearchContentInternalAsync<T>(string? datasetId, string groqQuery, bool returnDrafts, bool returnVersions = false)
     {
         var escapedQuery = groqQuery.Replace("&", "%26");
         var endpoint = $"/data/query/{datasetId}?query=*[{escapedQuery}] | order(_createdAt desc)";
         var request = new ApiRequest(endpoint, Method.Get, _creds);
         
-        if(returnDrafts)
+        if(returnDrafts || returnVersions)
         {
             request.AddParameter("perspective", "raw");
         }

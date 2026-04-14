@@ -144,23 +144,78 @@ public class ReleaseService
 
     public async Task CreateOrReplaceReleaseVersionsAsync(string datasetId, string releaseName, IEnumerable<JObject> contents)
     {
-        var mutations = contents
+        var releaseDocuments = contents
             .Select(PrepareReleaseVersionDocument(releaseName))
-            .Select(x => new JObject
-            {
-                ["createOrReplace"] = x
-            })
             .ToList();
 
-        if (!mutations.Any())
+        if (!releaseDocuments.Any())
         {
             return;
         }
 
-        var request = new ApiRequest($"/data/mutate/{datasetId}", Method.Post, _creds)
+        var existingDocumentIds = await GetExistingDocumentIdsAsync(
+            datasetId,
+            releaseDocuments
+                .Select(document => document["_id"]?.ToString())
+                .Where(id => !string.IsNullOrWhiteSpace(id))!);
+
+        var actions = releaseDocuments
+            .Select(document => CreateReleaseVersionAction(document, existingDocumentIds))
+            .ToList();
+
+        await DispatchActionsAsync(datasetId, actions);
+    }
+
+    private async Task<HashSet<string>> GetExistingDocumentIdsAsync(string datasetId, IEnumerable<string> ids)
+    {
+        var documentIds = ids
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct()
+            .ToList();
+
+        if (documentIds.Count == 0)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        var query = string.Join(" || ", documentIds.Select(id => $"_id == {JsonConvert.SerializeObject(id)}"));
+        var request = CreateQueryRequest(datasetId, $"*[{query}]{{_id}}");
+        var response = await _client.ExecuteWithErrorHandling<BaseSearchDto<ContentResponse>>(request);
+
+        return response.Result
+            .Select(x => x.ContentId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static JObject CreateReleaseVersionAction(JObject document, HashSet<string> existingDocumentIds)
+    {
+        var versionId = document["_id"]?.ToString();
+        var publishedId = ReleaseContentHelper.GetPublishedId(versionId ?? string.Empty);
+        var actionType = versionId != null && existingDocumentIds.Contains(versionId)
+            ? "sanity.action.document.version.replace"
+            : "sanity.action.document.version.create";
+
+        return new JObject
+        {
+            ["actionType"] = actionType,
+            ["publishedId"] = publishedId,
+            ["document"] = document
+        };
+    }
+
+    private async Task DispatchActionsAsync(string datasetId, IEnumerable<JObject> actions)
+    {
+        var actionList = actions.ToList();
+        if (!actionList.Any())
+        {
+            return;
+        }
+
+        var request = new ApiRequest($"/data/actions/{datasetId}", Method.Post, _creds)
             .AddStringBody(new JObject
             {
-                ["mutations"] = new JArray(mutations)
+                ["actions"] = new JArray(actionList)
             }.ToString(), ContentType.Json);
 
         await _client.ExecuteWithErrorHandling<TransactionResponse>(request);
@@ -186,13 +241,7 @@ public class ReleaseService
 
     private async Task DispatchActionsAsync(string datasetId, JObject action)
     {
-        var request = new ApiRequest($"/data/actions/{datasetId}", Method.Post, _creds)
-            .AddStringBody(new JObject
-            {
-                ["actions"] = new JArray(action)
-            }.ToString(), ContentType.Json);
-
-        await _client.ExecuteWithErrorHandling<TransactionResponse>(request);
+        await DispatchActionsAsync(datasetId, [action]);
     }
 
     private RestRequest CreateQueryRequest(string datasetId, string query)
