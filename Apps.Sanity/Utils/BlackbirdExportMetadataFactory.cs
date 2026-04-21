@@ -11,6 +11,12 @@ public static class BlackbirdExportMetadataFactory
     public static BlackbirdExportMetadata Create(JObject content, string fallbackContentId, string fallbackLanguage,
         string? studioBaseUrl)
     {
+        return Create(content, fallbackContentId, fallbackLanguage, studioBaseUrl, null);
+    }
+
+    public static BlackbirdExportMetadata Create(JObject content, string fallbackContentId, string fallbackLanguage,
+        string? studioBaseUrl, string? ucidOverride)
+    {
         var contentId = content["_id"]?.ToString() ?? fallbackContentId;
         var language = content["language"]?.ToString() ?? fallbackLanguage;
         var contentType = content["_type"]?.ToString();
@@ -18,7 +24,7 @@ public static class BlackbirdExportMetadataFactory
         return new BlackbirdExportMetadata
         {
             HtmlLanguage = language,
-            Ucid = contentId,
+            Ucid = string.IsNullOrWhiteSpace(ucidOverride) ? contentId : ucidOverride,
             ContentName = TryGetContentName(content, language),
             AdminUrl = BuildAdminUrl(studioBaseUrl, contentType, contentId),
             SystemName = SystemName,

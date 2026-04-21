@@ -93,7 +93,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         request.ReleaseName ??= ReleaseContentHelper.GetReleaseName(contentId);
         var result = await ExecuteUploadAsync(request, html, contentId, localizationStrategy);
 
-        return await CreateUploadOutputAsync(request, html, localizationStrategy, transformation, result);
+        return await CreateUploadOutputAsync(request, html, contentId, localizationStrategy, transformation, result);
     }
 
     private async Task<UploadContentResult> UpdateContentFieldLevelAsync(UpdateContentFromHtmlRequest request, string html, string contentId)
@@ -1141,9 +1141,15 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     }
 
     private async Task<UploadContentResponse> CreateUploadOutputAsync(UpdateContentFromHtmlRequest request, string html,
-        LocalizationStrategy localizationStrategy, Transformation? transformation, UploadContentResult result)
+        string sourceContentId, LocalizationStrategy localizationStrategy, Transformation? transformation, UploadContentResult result)
     {
-        var exportMetadata = BlackbirdExportMetadataFactory.Create(result.Content, result.ContentId, request.Locale, request.StudioUrl);
+        var sourceUcid = ReleaseContentHelper.GetPublishedId(sourceContentId);
+        var exportMetadata = BlackbirdExportMetadataFactory.Create(
+            result.Content,
+            result.ContentId,
+            request.Locale,
+            request.StudioUrl,
+            sourceUcid);
         var outputContent = transformation != null
             ? UploadContentArtifactBuilder.BuildTransformation(transformation, request.Locale, exportMetadata)
             : UploadContentArtifactBuilder.BuildHtml(
