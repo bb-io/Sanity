@@ -10,12 +10,13 @@ public static class JsonToHtmlConverter
 {
     public static string ToHtml(this JObject jObject, string contentId, string sourceLanguage, 
         AssetService assetService, string datasetId, Dictionary<string, JObject>? referencedEntries = null, 
-        IEnumerable<string>? orderOfFields = null, List<FieldSizeRestriction>? fieldRestrictions = null)
+        IEnumerable<string>? orderOfFields = null, List<FieldSizeRestriction>? fieldRestrictions = null,
+        BlackbirdExportMetadata? metadata = null)
     {
         var doc = new HtmlDocument();
 
         var htmlNode = doc.CreateElement("html");
-        htmlNode.SetAttributeValue("lang", sourceLanguage);
+        htmlNode.SetAttributeValue("lang", metadata?.HtmlLanguage ?? sourceLanguage);
         doc.DocumentNode.AppendChild(htmlNode);
 
         var headNode = doc.CreateElement("head");
@@ -34,6 +35,8 @@ public static class JsonToHtmlConverter
         metaStrategy.SetAttributeValue("name", "blackbird-localization-strategy");
         metaStrategy.SetAttributeValue("content", "FieldLevel");
         headNode.AppendChild(metaStrategy);
+
+        AddBlackbirdInteroperabilityMetadata(doc, headNode, metadata);
 
         var bodyNode = doc.CreateElement("body");
         htmlNode.AppendChild(bodyNode);
@@ -109,6 +112,34 @@ public static class JsonToHtmlConverter
         }
 
         return doc.DocumentNode.OuterHtml;
+    }
+
+    public static void AddBlackbirdInteroperabilityMetadata(HtmlDocument doc, HtmlNode headNode,
+        BlackbirdExportMetadata? metadata)
+    {
+        if (metadata == null)
+        {
+            return;
+        }
+
+        AddMetaTag(doc, headNode, "blackbird-ucid", metadata.Ucid);
+        AddMetaTag(doc, headNode, "blackbird-content-name", metadata.ContentName);
+        AddMetaTag(doc, headNode, "blackbird-admin-url", metadata.AdminUrl);
+        AddMetaTag(doc, headNode, "blackbird-system-name", metadata.SystemName);
+        AddMetaTag(doc, headNode, "blackbird-system-ref", metadata.SystemRef);
+    }
+
+    private static void AddMetaTag(HtmlDocument doc, HtmlNode headNode, string name, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var metaNode = doc.CreateElement("meta");
+        metaNode.SetAttributeValue("name", name);
+        metaNode.SetAttributeValue("content", EscapeHtml(value));
+        headNode.AppendChild(metaNode);
     }
     
     private static List<JProperty> ReorderProperties(List<JProperty> properties, List<string> orderOfFields)

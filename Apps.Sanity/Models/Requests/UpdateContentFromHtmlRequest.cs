@@ -22,4 +22,7 @@ public class UpdateContentFromHtmlRequest : DatasetIdentifier, IUploadContentInp
     
     [Display("Publish after update")]
     public bool? Publish { get; set; }
+
+    [Display("Studio URL", Description = "Optional. Used to generate `blackbird-admin-url` in the returned content file. Example: https://your-studio.example.com or http://localhost:3333")]
+    public string? StudioUrl { get; set; }
 }

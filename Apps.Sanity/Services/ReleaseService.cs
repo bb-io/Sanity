@@ -241,7 +241,7 @@ public class ReleaseService
 
     private async Task DispatchActionsAsync(string datasetId, JObject action)
     {
-        await DispatchActionsAsync(datasetId, [action]);
+        await DispatchActionsAsync(datasetId, new List<JObject> { action });
     }
 
     private RestRequest CreateQueryRequest(string datasetId, string query)

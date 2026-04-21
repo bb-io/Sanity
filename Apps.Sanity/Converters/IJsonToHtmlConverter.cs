@@ -9,5 +9,5 @@ public interface IJsonToHtmlConverter
     Task<string> ToHtmlAsync(JObject jObject, string contentId, string sourceLanguage, AssetService assetService,
         string datasetId, Dictionary<string, JObject>? referencedEntries = null,
         IEnumerable<string>? orderOfFields = null, List<FieldSizeRestriction>? fieldRestrictions = null,
-        IEnumerable<string>? excludedFields = null);
+        IEnumerable<string>? excludedFields = null, BlackbirdExportMetadata? metadata = null);
 }
