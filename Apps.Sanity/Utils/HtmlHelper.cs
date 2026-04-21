@@ -6,6 +6,31 @@ namespace Apps.Sanity.Utils;
 
 public static class HtmlHelper
 {
+    public static void UpsertMetaTag(HtmlDocument doc, string name, string? value)
+    {
+        var headNode = doc.DocumentNode.SelectSingleNode("//head");
+        if (headNode == null)
+        {
+            return;
+        }
+
+        var metaNode = doc.DocumentNode.SelectSingleNode($"//meta[@name='{name}']");
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            metaNode?.Remove();
+            return;
+        }
+
+        metaNode ??= doc.CreateElement("meta");
+        metaNode.SetAttributeValue("name", name);
+        metaNode.SetAttributeValue("content", value);
+
+        if (metaNode.ParentNode == null)
+        {
+            headNode.AppendChild(metaNode);
+        }
+    }
+
     public static string ExtractContentId(string html)
     {
         var doc = new HtmlDocument();

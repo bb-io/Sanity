@@ -32,7 +32,8 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         Dictionary<string, JObject>? referencedEntries = null,
         IEnumerable<string>? orderOfFields = null, 
         List<FieldSizeRestriction>? fieldRestrictions = null,
-        IEnumerable<string>? excludedFields = null)
+        IEnumerable<string>? excludedFields = null,
+        BlackbirdExportMetadata? metadata = null)
     {
         var allExcludedFields = new HashSet<string>(DefaultExcludedFields, StringComparer.OrdinalIgnoreCase);
         if (excludedFields != null)
@@ -57,7 +58,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         var doc = new HtmlDocument();
 
         var htmlNode = doc.CreateElement("html");
-        htmlNode.SetAttributeValue("lang", sourceLanguage);
+        htmlNode.SetAttributeValue("lang", metadata?.HtmlLanguage ?? sourceLanguage);
         doc.DocumentNode.AppendChild(htmlNode);
 
         var headNode = doc.CreateElement("head");
@@ -76,6 +77,8 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         metaStrategy.SetAttributeValue("name", "blackbird-localization-strategy");
         metaStrategy.SetAttributeValue("content", "DocumentLevel");
         headNode.AppendChild(metaStrategy);
+
+        JsonToHtmlConverter.AddBlackbirdInteroperabilityMetadata(doc, headNode, metadata);
 
         // Store original JSON to preserve non-translatable fields
         var metaOriginalJson = doc.CreateElement("meta");
