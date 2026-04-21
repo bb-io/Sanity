@@ -14,6 +14,7 @@ using Blackbird.Applications.SDK.Blueprints;
 using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Actions;
 using Blackbird.Applications.Sdk.Common.Exceptions;
+using Blackbird.Applications.Sdk.Common.Files;
 using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Files;
@@ -33,12 +34,6 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 {
     private readonly DraftContentHelper _draftHelper = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
     private readonly ReleaseService _releaseService = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
-
-    private sealed record UploadResult(
-        string ContentId,
-        JObject Content,
-        Dictionary<string, string> ReferenceIdMapping,
-        Dictionary<string, JObject> ReferencedContents);
 
     [Action("Search content",
         Description =
@@ -75,83 +70,15 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             throw new PluginMisconfigurationException("Localization strategy must be specified.");
         }
-        
-        var jObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
+
+        var content = await GetContentOrThrowAsync(
             getContentAsHtmlRequest.ContentId,
             getContentAsHtmlRequest.GetDatasetIdOrDefault());
+        var referencedEntries = await GetReferencedEntriesAsync(getContentAsHtmlRequest, content);
+        var fieldRestrictions = GetFieldRestrictions(getContentAsHtmlRequest.FieldNames, getContentAsHtmlRequest.FieldMaxLength);
+        var html = await BuildContentHtmlAsync(getContentAsHtmlRequest, content, referencedEntries, fieldRestrictions);
 
-        if (jObjects.Count == 0)
-        {
-            throw new PluginMisconfigurationException(
-                "No content found for the provided ID. Please verify that the ID is correct and try again.");
-        }
-
-        var content = jObjects.First();
-        var referencedEntries = new Dictionary<string, JObject>();
-        if (getContentAsHtmlRequest.IncludeReferenceEntries == true || getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true)
-        {
-            var referenceFieldNames = getContentAsHtmlRequest.ReferenceFieldNames?.ToList() ?? new List<string>();
-            await CollectReferencesRecursivelyAsync(
-                content,
-                getContentAsHtmlRequest.DatasetId,
-                getContentAsHtmlRequest.IncludeReferenceEntries == true,
-                getContentAsHtmlRequest.IncludeRichTextReferenceEntries == true,
-                referencedEntries,
-                referenceFieldNames
-            );
-        }
-
-        var assetService = new AssetService(InvocationContext);
-        
-        List<FieldSizeRestriction>? fieldRestrictions = null;
-        if (getContentAsHtmlRequest.FieldNames != null && getContentAsHtmlRequest.FieldMaxLength != null)
-        {
-            var fieldNames = getContentAsHtmlRequest.FieldNames.ToList();
-            var fieldLengths = getContentAsHtmlRequest.FieldMaxLength.ToList();
-            
-            if (fieldNames.Count != fieldLengths.Count)
-            {
-                throw new PluginMisconfigurationException(
-                    "The number of field names must match the number of field max length values.");
-            }
-            
-            fieldRestrictions = fieldNames
-                .Zip(fieldLengths, (name, length) => new FieldSizeRestriction
-                {
-                    FieldName = name,
-                    Restrictions = new Blackbird.Filters.Shared.SizeRestrictions
-                    {
-                        MaximumSize = length
-                    }
-                })
-                .ToList();
-        }
-        
-        var strategy = Enum.Parse<LocalizationStrategy>(getContentAsHtmlRequest.LocalizationStrategy);
-        var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
-        var sourceLanguage = content["language"]?.ToString() ?? getContentAsHtmlRequest.SourceLanguage;
-        var exportMetadata = BlackbirdExportMetadataFactory.Create(content, getContentAsHtmlRequest.ContentId,
-            sourceLanguage, getContentAsHtmlRequest.StudioUrl);
-        var html = await converter.ToHtmlAsync(
-            content, 
-            getContentAsHtmlRequest.ContentId, 
-            sourceLanguage, 
-            assetService, 
-            getContentAsHtmlRequest.ToString(), 
-            referencedEntries, 
-            getContentAsHtmlRequest.OrderOfFields, 
-            fieldRestrictions,
-            getContentAsHtmlRequest.ExcludedFields,
-            exportMetadata);
-        
-        var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
-        memoryStream.Position = 0;
-
-        var fileReference = await fileManagementClient.UploadAsync(memoryStream, "text/html", $"{getContentAsHtmlRequest.ContentId}.html");
-        return new()
-        {
-            Content = fileReference
-        };
+        return await UploadHtmlOutputAsync($"{getContentAsHtmlRequest.ContentId}.html", html);
     }
 
     [Action("Upload content", Description = "Update localizable content fields from HTML file")]
@@ -160,73 +87,16 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     {
         ValidateUploadRequest(request);
 
-        var file = await fileManagementClient.DownloadAsync(request.Content);
-        var bytes = await file.GetByteData();
-        var fileContent = Encoding.Default.GetString(bytes);
-        var html = fileContent;
-        Transformation? transformation = null;
-        if (Xliff2Serializer.IsXliff2(fileContent))
-        {
-            transformation = Transformation.Parse(fileContent, request.Content.Name);
-            html = transformation.Target().Serialize();
-            if (html == null)
-            {
-                throw new PluginMisconfigurationException("XLIFF did not contain any files");
-            }
-        }
-
+        var (html, transformation) = await ReadUploadInputAsync(request.Content);
         var contentId = request.ContentId ?? HtmlHelper.ExtractContentId(html);
         var localizationStrategy = HtmlHelper.ExtractLocalizationStrategy(html);
         request.ReleaseName ??= ReleaseContentHelper.GetReleaseName(contentId);
+        var result = await ExecuteUploadAsync(request, html, contentId, localizationStrategy);
 
-        UploadResult result;
-        if (!string.IsNullOrWhiteSpace(request.ReleaseName))
-        {
-            if (localizationStrategy == LocalizationStrategy.DocumentLevel)
-            {
-                result = await UpdateContentDocumentLevelInReleaseAsync(request, html, contentId);
-            }
-            else
-            {
-                result = await UpdateContentFieldLevelInReleaseAsync(request, html, contentId);
-            }
-        }
-        else if (localizationStrategy == LocalizationStrategy.DocumentLevel)
-        {
-            result = await UpdateContentDocumentLevelAsync(request, html, contentId);
-        }
-        else
-        {
-            result = await UpdateContentFieldLevelAsync(request, html, contentId);
-        }
-
-        var exportMetadata = BlackbirdExportMetadataFactory.Create(result.Content, result.ContentId, request.Locale, request.StudioUrl);
-        var outputContent = transformation != null
-            ? UploadContentArtifactBuilder.BuildTransformation(transformation, request.Locale, exportMetadata)
-            : UploadContentArtifactBuilder.BuildHtml(
-                html,
-                request.Locale,
-                result.ContentId,
-                exportMetadata,
-                localizationStrategy == LocalizationStrategy.DocumentLevel ? result.Content : null,
-                result.ReferenceIdMapping,
-                result.ReferencedContents);
-
-        using var outputStream = new MemoryStream(Encoding.UTF8.GetBytes(outputContent));
-        outputStream.Position = 0;
-
-        var outputFile = await fileManagementClient.UploadAsync(
-            outputStream,
-            transformation != null ? request.Content.ContentType ?? "application/xliff+xml" : "text/html",
-            request.Content.Name ?? $"{result.ContentId}.html");
-
-        return new UploadContentResponse
-        {
-            Content = outputFile
-        };
+        return await CreateUploadOutputAsync(request, html, localizationStrategy, transformation, result);
     }
 
-    private async Task<UploadResult> UpdateContentFieldLevelAsync(UpdateContentFromHtmlRequest request, string html, string contentId)
+    private async Task<UploadContentResult> UpdateContentFieldLevelAsync(UpdateContentFromHtmlRequest request, string html, string contentId)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
@@ -325,14 +195,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 : DraftContentHelper.GetDraftId(DraftContentHelper.GetPublishedId(key)),
             StringComparer.Ordinal);
 
-        return new UploadResult(
+        return new UploadContentResult(
             targetContentId,
             targetContent,
             referenceIdMapping,
             new Dictionary<string, JObject>());
     }
 
-    private async Task<UploadResult> UpdateContentFieldLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string contentId)
+    private async Task<UploadContentResult> UpdateContentFieldLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string contentId)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
@@ -374,7 +244,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 key => ReleaseContentHelper.BuildVersionId(releaseName, key),
                 StringComparer.Ordinal);
 
-            return new UploadResult(
+            return new UploadContentResult(
                 releaseContentId,
                 releaseContent,
                 emptyReferenceMapping,
@@ -401,14 +271,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             key => ReleaseContentHelper.BuildVersionId(releaseName, key),
             StringComparer.Ordinal);
 
-        return new UploadResult(
+        return new UploadContentResult(
             targetContentId,
             targetContent,
             referenceIdMapping,
             new Dictionary<string, JObject>());
     }
 
-    private async Task<UploadResult> UpdateContentDocumentLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
+    private async Task<UploadContentResult> UpdateContentDocumentLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
     {
         var datasetId = request.GetDatasetIdOrDefault();
         var releaseName = request.ReleaseName!;
@@ -512,14 +382,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var targetContent = await GetReleaseAwareContentAsync(targetContentId, datasetId);
         var referencedContents = await GetReleaseAwareContentsByIdAsync(datasetId, idMapping.Values);
 
-        return new UploadResult(
+        return new UploadContentResult(
             targetContentId,
             targetContent,
             outputReferenceIdMapping,
             referencedContents);
     }
 
-    private async Task<UploadResult> UpdateContentDocumentLevelAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
+    private async Task<UploadContentResult> UpdateContentDocumentLevelAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
     {
         var translationService = new TranslationMetadataService(Client, Creds);
         
@@ -761,7 +631,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var targetContent = await GetContentForOutputAsync(translatedDocumentId, request.GetDatasetIdOrDefault());
         var referencedContents = await GetContentsByExactIdsAsync(request.GetDatasetIdOrDefault(), idMapping.Values);
 
-        return new UploadResult(
+        return new UploadContentResult(
             translatedDocumentId,
             targetContent,
             idMapping,
@@ -1138,6 +1008,171 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             throw new PluginMisconfigurationException(
                 "Publish after update cannot be used together with Release name. Choose either direct publishing or saving the translation into a release.");
         }
+    }
+
+    private async Task<JObject> GetContentOrThrowAsync(string contentId, string datasetId)
+    {
+        var contentObjects = await _draftHelper.GetContentWithDraftFallbackAsync(contentId, datasetId);
+        if (contentObjects.Count == 0)
+        {
+            throw new PluginMisconfigurationException(
+                "No content found for the provided ID. Please verify that the ID is correct and try again.");
+        }
+
+        return contentObjects.First();
+    }
+
+    private async Task<Dictionary<string, JObject>> GetReferencedEntriesAsync(GetContentAsHtmlRequest request, JObject content)
+    {
+        var referencedEntries = new Dictionary<string, JObject>();
+        if (request.IncludeReferenceEntries != true && request.IncludeRichTextReferenceEntries != true)
+        {
+            return referencedEntries;
+        }
+
+        var referenceFieldNames = request.ReferenceFieldNames?.ToList() ?? new List<string>();
+        await CollectReferencesRecursivelyAsync(
+            content,
+            request.DatasetId,
+            request.IncludeReferenceEntries == true,
+            request.IncludeRichTextReferenceEntries == true,
+            referencedEntries,
+            referenceFieldNames);
+
+        return referencedEntries;
+    }
+
+    private static List<FieldSizeRestriction>? GetFieldRestrictions(IEnumerable<string>? fieldNamesInput,
+        IEnumerable<int>? fieldLengthsInput)
+    {
+        if (fieldNamesInput == null || fieldLengthsInput == null)
+        {
+            return null;
+        }
+
+        var fieldNames = fieldNamesInput.ToList();
+        var fieldLengths = fieldLengthsInput.ToList();
+
+        if (fieldNames.Count != fieldLengths.Count)
+        {
+            throw new PluginMisconfigurationException(
+                "The number of field names must match the number of field max length values.");
+        }
+
+        return fieldNames
+            .Zip(fieldLengths, (name, length) => new FieldSizeRestriction
+            {
+                FieldName = name,
+                Restrictions = new Blackbird.Filters.Shared.SizeRestrictions
+                {
+                    MaximumSize = length
+                }
+            })
+            .ToList();
+    }
+
+    private async Task<string> BuildContentHtmlAsync(GetContentAsHtmlRequest request, JObject content,
+        Dictionary<string, JObject> referencedEntries, List<FieldSizeRestriction>? fieldRestrictions)
+    {
+        var strategy = Enum.Parse<LocalizationStrategy>(request.LocalizationStrategy);
+        var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
+        var sourceLanguage = content["language"]?.ToString() ?? request.SourceLanguage;
+        var exportMetadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, sourceLanguage, request.StudioUrl);
+
+        return await converter.ToHtmlAsync(
+            content,
+            request.ContentId,
+            sourceLanguage,
+            new AssetService(InvocationContext),
+            request.ToString(),
+            referencedEntries,
+            request.OrderOfFields,
+            fieldRestrictions,
+            request.ExcludedFields,
+            exportMetadata);
+    }
+
+    private async Task<GetContentAsHtmlResponse> UploadHtmlOutputAsync(string fileName, string html)
+    {
+        using var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
+        memoryStream.Position = 0;
+
+        var fileReference = await fileManagementClient.UploadAsync(memoryStream, "text/html", fileName);
+        return new GetContentAsHtmlResponse
+        {
+            Content = fileReference
+        };
+    }
+
+    private async Task<(string Html, Transformation? Transformation)> ReadUploadInputAsync(FileReference content)
+    {
+        var file = await fileManagementClient.DownloadAsync(content);
+        var bytes = await file.GetByteData();
+        var fileContent = Encoding.Default.GetString(bytes);
+
+        if (!Xliff2Serializer.IsXliff2(fileContent))
+        {
+            return (fileContent, null);
+        }
+
+        var transformation = Transformation.Parse(fileContent, content.Name);
+        var html = transformation.Target().Serialize();
+        if (html == null)
+        {
+            throw new PluginMisconfigurationException("XLIFF did not contain any files");
+        }
+
+        return (html, transformation);
+    }
+
+    private async Task<UploadContentResult> ExecuteUploadAsync(UpdateContentFromHtmlRequest request, string html,
+        string contentId, LocalizationStrategy localizationStrategy)
+    {
+        if (!string.IsNullOrWhiteSpace(request.ReleaseName))
+        {
+            return localizationStrategy == LocalizationStrategy.DocumentLevel
+                ? await UpdateContentDocumentLevelInReleaseAsync(request, html, contentId)
+                : await UpdateContentFieldLevelInReleaseAsync(request, html, contentId);
+        }
+
+        return localizationStrategy == LocalizationStrategy.DocumentLevel
+            ? await UpdateContentDocumentLevelAsync(request, html, contentId)
+            : await UpdateContentFieldLevelAsync(request, html, contentId);
+    }
+
+    private async Task<UploadContentResponse> CreateUploadOutputAsync(UpdateContentFromHtmlRequest request, string html,
+        LocalizationStrategy localizationStrategy, Transformation? transformation, UploadContentResult result)
+    {
+        var exportMetadata = BlackbirdExportMetadataFactory.Create(result.Content, result.ContentId, request.Locale, request.StudioUrl);
+        var outputContent = transformation != null
+            ? UploadContentArtifactBuilder.BuildTransformation(transformation, request.Locale, exportMetadata)
+            : UploadContentArtifactBuilder.BuildHtml(
+                html,
+                request.Locale,
+                result.ContentId,
+                exportMetadata,
+                localizationStrategy == LocalizationStrategy.DocumentLevel ? result.Content : null,
+                result.ReferenceIdMapping,
+                result.ReferencedContents);
+
+        return await UploadOutputFileAsync(request, result.ContentId, transformation != null, outputContent);
+    }
+
+    private async Task<UploadContentResponse> UploadOutputFileAsync(UpdateContentFromHtmlRequest request, string contentId,
+        bool isTransformationOutput, string outputContent)
+    {
+        using var outputStream = new MemoryStream(Encoding.UTF8.GetBytes(outputContent));
+        outputStream.Position = 0;
+
+        var outputFile = await fileManagementClient.UploadAsync(
+            outputStream,
+            isTransformationOutput ? request.Content.ContentType ?? "application/xliff+xml" : "text/html",
+            request.Content.Name ?? $"{contentId}.html");
+
+        return new UploadContentResponse
+        {
+            Content = outputFile
+        };
     }
 
     private async Task<JObject> GetContentForOutputAsync(string contentId, string datasetId)
