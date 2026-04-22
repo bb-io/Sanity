@@ -196,12 +196,18 @@ public class ReleaseService
             ? "sanity.action.document.version.replace"
             : "sanity.action.document.version.create";
 
-        return new JObject
+        var action = new JObject
         {
             ["actionType"] = actionType,
-            ["publishedId"] = publishedId,
             ["document"] = document
         };
+
+        if (actionType == "sanity.action.document.version.create")
+        {
+            action["publishedId"] = publishedId;
+        }
+
+        return action;
     }
 
     private async Task DispatchActionsAsync(string datasetId, IEnumerable<JObject> actions)
