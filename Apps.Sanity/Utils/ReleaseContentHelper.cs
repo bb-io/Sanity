@@ -31,6 +31,14 @@ public static class ReleaseContentHelper
         return $"{VersionsPrefix}{releaseName}.{publishedId}";
     }
 
+    public static string GetUploadArtifactSourceUcid(string sourceContentId, bool publishedDocumentExists)
+    {
+        var publishedId = GetPublishedId(sourceContentId);
+        return IsVersionId(sourceContentId) && !publishedDocumentExists
+            ? sourceContentId
+            : publishedId;
+    }
+
     public static string GetPublishedId(string contentId)
     {
         if (string.IsNullOrWhiteSpace(contentId))

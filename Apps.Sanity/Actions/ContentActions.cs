@@ -1143,7 +1143,9 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     private async Task<UploadContentResponse> CreateUploadOutputAsync(UpdateContentFromHtmlRequest request, string html,
         string sourceContentId, LocalizationStrategy localizationStrategy, Transformation? transformation, UploadContentResult result)
     {
-        var sourceUcid = ReleaseContentHelper.GetPublishedId(sourceContentId);
+        var sourceUcid = await ResolveUploadArtifactSourceUcidAsync(
+            sourceContentId,
+            request.GetDatasetIdOrDefault());
         var exportMetadata = BlackbirdExportMetadataFactory.Create(
             result.Content,
             result.ContentId,
@@ -1161,6 +1163,22 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 result.ReferencedContents);
 
         return await UploadOutputFileAsync(request, result.ContentId, transformation != null, outputContent);
+    }
+
+    private async Task<string> ResolveUploadArtifactSourceUcidAsync(string sourceContentId, string datasetId)
+    {
+        if (!ReleaseContentHelper.IsVersionId(sourceContentId))
+        {
+            return ReleaseContentHelper.GetUploadArtifactSourceUcid(
+                sourceContentId,
+                publishedDocumentExists: false);
+        }
+
+        var publishedId = ReleaseContentHelper.GetPublishedId(sourceContentId);
+        var publishedEntries = await GetContentsByExactIdsAsync(datasetId, [publishedId]);
+        var publishedDocumentExists = publishedEntries.ContainsKey(publishedId);
+
+        return ReleaseContentHelper.GetUploadArtifactSourceUcid(sourceContentId, publishedDocumentExists);
     }
 
     private async Task<UploadContentResponse> UploadOutputFileAsync(UpdateContentFromHtmlRequest request, string contentId,

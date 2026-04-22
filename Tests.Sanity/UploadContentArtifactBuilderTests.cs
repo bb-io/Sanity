@@ -1,5 +1,7 @@
 using Apps.Sanity.Models;
 using Apps.Sanity.Utils;
+using Blackbird.Filters.Shared;
+using Blackbird.Filters.Transformations;
 using FluentAssertions;
 using HtmlAgilityPack;
 using Newtonsoft.Json;
@@ -97,6 +99,49 @@ public class UploadContentArtifactBuilderTests
         FromBase64(referencedDoc.GetAttributeValue("data-original-json", string.Empty))
             .Should().Be(newRefJson.ToString(Formatting.None));
     }
+    
+    [TestMethod]
+    public void BuildHtml_DocumentLevel_ShouldKeepPublishedUcidForExistingReleaseDocument()
+    {
+        var newMainJson = new JObject
+        {
+            ["_id"] = "versions.release.translated-main",
+            ["language"] = "de",
+            ["title"] = "Titel"
+        };
+
+        var html = @"<html lang=""en"">
+<head>
+<meta charset=""UTF-8"">
+<meta name=""blackbird-content-id"" content=""old-main"">
+</head>
+<body>
+<div data-content-id=""old-main""></div>
+</body>
+</html>";
+
+        var output = UploadContentArtifactBuilder.BuildHtml(
+            html,
+            "de",
+            "versions.release.translated-main",
+            new BlackbirdExportMetadata
+            {
+                HtmlLanguage = "de",
+                Ucid = "translated-main",
+                ContentName = "Titel",
+                SystemName = "Sanity",
+                SystemRef = "https://www.sanity.io/"
+            },
+            newMainJson);
+
+        var doc = new HtmlDocument();
+        doc.LoadHtml(output);
+
+        doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-content-id']")!
+            .GetAttributeValue("content", string.Empty).Should().Be("versions.release.translated-main");
+        doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-ucid']")!
+            .GetAttributeValue("content", string.Empty).Should().Be("translated-main");
+    }
 
     [TestMethod]
     public void BuildHtml_FieldLevel_ShouldUpdateReferenceIdsAndRemoveEmptyAdminUrl()
@@ -142,6 +187,38 @@ public class UploadContentArtifactBuilderTests
         var refEntry = doc.DocumentNode.SelectSingleNode("//div[@id='referenced-entries']//div[@data-content-id]")!;
         refEntry.GetAttributeValue("data-content-id", string.Empty).Should().Be("drafts.old-ref");
         refEntry.Id.Should().Be("ref-drafts.old-ref");
+    }
+
+    [TestMethod]
+    public void BuildTransformation_ShouldUseProvidedUcidInSystemReference()
+    {
+        var transformation = new Transformation("test.xlf", "en")
+        {
+            TargetSystemReference = new SystemReference
+            {
+                ContentId = "old-id"
+            }
+        };
+
+        var output = UploadContentArtifactBuilder.BuildTransformation(
+            transformation,
+            "de",
+            new BlackbirdExportMetadata
+            {
+                HtmlLanguage = "de",
+                Ucid = "versions.release.translated-main",
+                ContentName = "Titel",
+                SystemName = "Sanity",
+                SystemRef = "https://www.sanity.io/"
+            });
+
+        output.Should().NotBeNullOrWhiteSpace();
+        transformation.TargetLanguage.Should().Be("de");
+        transformation.TargetSystemReference.Should().NotBeNull();
+        transformation.TargetSystemReference!.ContentId.Should().Be("versions.release.translated-main");
+        transformation.TargetSystemReference.ContentName.Should().Be("Titel");
+        transformation.TargetSystemReference.SystemName.Should().Be("Sanity");
+        transformation.TargetSystemReference.SystemRef.Should().Be("https://www.sanity.io/");
     }
 
     private static string ToBase64(JObject json)
