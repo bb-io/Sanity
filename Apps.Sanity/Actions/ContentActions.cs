@@ -1077,7 +1077,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var strategy = Enum.Parse<LocalizationStrategy>(request.LocalizationStrategy);
         var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
         var sourceLanguage = content["language"]?.ToString() ?? request.SourceLanguage;
-        var exportMetadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, sourceLanguage, request.StudioUrl);
+        var exportMetadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, sourceLanguage);
 
         return await converter.ToHtmlAsync(
             content,
@@ -1148,7 +1148,6 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             result.Content,
             result.ContentId,
             request.Locale,
-            request.StudioUrl,
             sourceUcid);
         var outputContent = transformation != null
             ? UploadContentArtifactBuilder.BuildTransformation(transformation, request.Locale, exportMetadata)

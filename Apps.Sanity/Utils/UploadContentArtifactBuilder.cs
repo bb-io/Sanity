@@ -23,7 +23,6 @@ public static class UploadContentArtifactBuilder
         HtmlHelper.UpsertMetaTag(doc, "blackbird-content-id", targetContentId);
         HtmlHelper.UpsertMetaTag(doc, "blackbird-ucid", metadata.Ucid);
         HtmlHelper.UpsertMetaTag(doc, "blackbird-content-name", metadata.ContentName);
-        HtmlHelper.UpsertMetaTag(doc, "blackbird-admin-url", metadata.AdminUrl);
         HtmlHelper.UpsertMetaTag(doc, "blackbird-system-name", metadata.SystemName);
         HtmlHelper.UpsertMetaTag(doc, "blackbird-system-ref", metadata.SystemRef);
 
@@ -91,7 +90,6 @@ public static class UploadContentArtifactBuilder
         transformation.TargetSystemReference ??= new SystemReference();
         transformation.TargetSystemReference.ContentId = metadata.Ucid;
         transformation.TargetSystemReference.ContentName = metadata.ContentName;
-        transformation.TargetSystemReference.AdminUrl = metadata.AdminUrl;
         transformation.TargetSystemReference.PublicUrl = null;
         transformation.TargetSystemReference.SystemName = metadata.SystemName;
         transformation.TargetSystemReference.SystemRef = metadata.SystemRef;

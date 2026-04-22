@@ -6,10 +6,12 @@ namespace Apps.Sanity.Utils;
 
 public static class RichTextToHtmlConvertor
 {
-    public static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath, AssetService assetService, string datasetId)
+    public static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath, string entityId,
+        AssetService assetService, string datasetId)
     {
         var wrapper = doc.CreateElement("div");
         wrapper.SetAttributeValue("data-json-path", currentPath);
+        JsonToHtmlConverter.AddBlackbirdKey(wrapper, entityId, currentPath);
         wrapper.SetAttributeValue("data-rich-text", "true");
         wrapper.SetAttributeValue("data-original-json", jToken.ToString(Newtonsoft.Json.Formatting.None));
 

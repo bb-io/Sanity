@@ -34,7 +34,4 @@ public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
     
     [Display("Excluded fields", Description = "Additional field names to exclude from translation (beyond the default system fields: _createdAt, _id, _rev, _type, _updatedAt, language). Only applicable for document level localization.")]
     public IEnumerable<string>? ExcludedFields { get; set; }
-
-    [Display("Studio URL", Description = "Optional. Used to generate `blackbird-admin-url` in Download content output. Example: https://your-studio.example.com")]
-    public string? StudioUrl { get; set; }
 }
