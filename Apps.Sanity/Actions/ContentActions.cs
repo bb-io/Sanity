@@ -90,8 +90,9 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var (html, transformation) = await ReadUploadInputAsync(request.Content);
         var contentId = request.ContentId ?? HtmlHelper.ExtractContentId(html);
         var localizationStrategy = HtmlHelper.ExtractLocalizationStrategy(html);
+        var translationMetadataSchema = ResolveTranslationMetadataSchema(request, localizationStrategy);
         request.ReleaseName ??= ReleaseContentHelper.GetReleaseName(contentId);
-        var result = await ExecuteUploadAsync(request, html, contentId, localizationStrategy);
+        var result = await ExecuteUploadAsync(request, html, contentId, localizationStrategy, translationMetadataSchema);
 
         return await CreateUploadOutputAsync(request, html, contentId, localizationStrategy, transformation, result);
     }
@@ -278,7 +279,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             new Dictionary<string, JObject>());
     }
 
-    private async Task<UploadContentResult> UpdateContentDocumentLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
+    private async Task<UploadContentResult> UpdateContentDocumentLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId, TranslationMetadataSchema translationMetadataSchema)
     {
         var datasetId = request.GetDatasetIdOrDefault();
         var releaseName = request.ReleaseName!;
@@ -342,7 +343,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 localizedReferenceId,
                 baseReferenceLanguage,
                 request.Locale,
-                datasetId);
+                datasetId,
+                translationMetadataSchema);
 
             releaseDocuments.Add(referenceMetadataContent);
 
@@ -372,7 +374,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             translatedDocumentId,
             baseLanguage,
             request.Locale,
-            datasetId);
+            datasetId,
+            translationMetadataSchema);
 
         releaseDocuments.Add(mainMetadataContent);
 
@@ -389,7 +392,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             referencedContents);
     }
 
-    private async Task<UploadContentResult> UpdateContentDocumentLevelAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId)
+    private async Task<UploadContentResult> UpdateContentDocumentLevelAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId, TranslationMetadataSchema translationMetadataSchema)
     {
         var translationService = new TranslationMetadataService(Client, Creds);
         
@@ -527,11 +530,12 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 try
                 {
                     await translationService.CreateOrUpdateTranslationMetadataAsync(
-                        baseRefDocId, 
-                        localizedRefId, 
-                        baseRefLanguage, 
-                        request.Locale, 
-                        request.GetDatasetIdOrDefault());
+                        baseRefDocId,
+                        localizedRefId,
+                        baseRefLanguage,
+                        request.Locale,
+                        request.GetDatasetIdOrDefault(),
+                        translationMetadataSchema);
                 }
                 catch (Exception ex)
                 {
@@ -614,11 +618,12 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             try
             {
                 await translationService.CreateOrUpdateTranslationMetadataAsync(
-                    baseDocumentId, 
-                    translatedDocumentId, 
-                    baseLanguage, 
-                    request.Locale, 
-                    request.GetDatasetIdOrDefault());
+                    baseDocumentId,
+                    translatedDocumentId,
+                    baseLanguage,
+                    request.Locale,
+                    request.GetDatasetIdOrDefault(),
+                    translationMetadataSchema);
             }
             catch (Exception ex)
             {
@@ -1126,18 +1131,41 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     }
 
     private async Task<UploadContentResult> ExecuteUploadAsync(UpdateContentFromHtmlRequest request, string html,
-        string contentId, LocalizationStrategy localizationStrategy)
+        string contentId, LocalizationStrategy localizationStrategy, TranslationMetadataSchema translationMetadataSchema)
     {
         if (!string.IsNullOrWhiteSpace(request.ReleaseName))
         {
             return localizationStrategy == LocalizationStrategy.DocumentLevel
-                ? await UpdateContentDocumentLevelInReleaseAsync(request, html, contentId)
+                ? await UpdateContentDocumentLevelInReleaseAsync(request, html, contentId, translationMetadataSchema)
                 : await UpdateContentFieldLevelInReleaseAsync(request, html, contentId);
         }
 
         return localizationStrategy == LocalizationStrategy.DocumentLevel
-            ? await UpdateContentDocumentLevelAsync(request, html, contentId)
+            ? await UpdateContentDocumentLevelAsync(request, html, contentId, translationMetadataSchema)
             : await UpdateContentFieldLevelAsync(request, html, contentId);
+    }
+
+    private static TranslationMetadataSchema ResolveTranslationMetadataSchema(
+        UpdateContentFromHtmlRequest request, LocalizationStrategy localizationStrategy)
+    {
+        if (string.IsNullOrWhiteSpace(request.TranslationMetadataSchema))
+        {
+            return TranslationMetadataSchema.Default;
+        }
+
+        if (localizationStrategy != LocalizationStrategy.DocumentLevel)
+        {
+            throw new PluginMisconfigurationException(
+                "Translation metadata schema can only be specified for document level localization. Remove the value or upload content exported with document level localization.");
+        }
+
+        if (!Enum.TryParse<TranslationMetadataSchema>(request.TranslationMetadataSchema, ignoreCase: true, out var parsed))
+        {
+            throw new PluginMisconfigurationException(
+                $"Unknown translation metadata schema '{request.TranslationMetadataSchema}'. Use one of: {string.Join(", ", Enum.GetNames<TranslationMetadataSchema>())}.");
+        }
+
+        return parsed;
     }
 
     private async Task<UploadContentResponse> CreateUploadOutputAsync(UpdateContentFromHtmlRequest request, string html,
