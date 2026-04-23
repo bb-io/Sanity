@@ -8,14 +8,12 @@ public static class BlackbirdExportMetadataFactory
     private const string SystemName = "Sanity";
     private const string SystemRef = "https://www.sanity.io/";
 
-    public static BlackbirdExportMetadata Create(JObject content, string fallbackContentId, string fallbackLanguage,
-        string? studioBaseUrl)
+    public static BlackbirdExportMetadata Create(JObject content, string fallbackContentId, string fallbackLanguage)
     {
-        return Create(content, fallbackContentId, fallbackLanguage, studioBaseUrl, null);
+        return Create(content, fallbackContentId, fallbackLanguage, null);
     }
 
-    public static BlackbirdExportMetadata Create(JObject content, string fallbackContentId, string fallbackLanguage,
-        string? studioBaseUrl, string? ucidOverride)
+    public static BlackbirdExportMetadata Create(JObject content, string fallbackContentId, string fallbackLanguage, string? ucidOverride)
     {
         var contentId = content["_id"]?.ToString() ?? fallbackContentId;
         var language = content["language"]?.ToString() ?? fallbackLanguage;
@@ -26,7 +24,6 @@ public static class BlackbirdExportMetadataFactory
             HtmlLanguage = language,
             Ucid = string.IsNullOrWhiteSpace(ucidOverride) ? contentId : ucidOverride,
             ContentName = TryGetContentName(content, language),
-            AdminUrl = BuildAdminUrl(studioBaseUrl, contentType, contentId),
             SystemName = SystemName,
             SystemRef = SystemRef
         };
@@ -83,21 +80,5 @@ public static class BlackbirdExportMetadataFactory
         }
 
         return null;
-    }
-
-    private static string? BuildAdminUrl(string? studioBaseUrl, string? contentType, string contentId)
-    {
-        if (string.IsNullOrWhiteSpace(studioBaseUrl) || string.IsNullOrWhiteSpace(contentType) ||
-            string.IsNullOrWhiteSpace(contentId))
-        {
-            return null;
-        }
-
-        if (!Uri.TryCreate(studioBaseUrl.TrimEnd('/'), UriKind.Absolute, out var parsedBaseUrl))
-        {
-            return null;
-        }
-
-        return $"{parsedBaseUrl.AbsoluteUri.TrimEnd('/')}/structure/{Uri.EscapeDataString(contentType)};{Uri.EscapeDataString(contentId)}";
     }
 }

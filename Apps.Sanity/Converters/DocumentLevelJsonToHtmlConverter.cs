@@ -128,7 +128,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             }
 
             var propValue = property.Value;
-            var convertedNode = await ConvertTokenToHtml(doc, propValue, propName, context);
+            var convertedNode = await ConvertTokenToHtml(doc, propValue, propName, context, contentId);
             if (convertedNode != null)
             {
                 mainContentDiv.AppendChild(convertedNode);
@@ -161,7 +161,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                         continue;
 
                     var refFieldPath = $"{refProperty.Name}";
-                    var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, context);
+                    var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, context, refId);
                     if (refFieldNode != null)
                     {
                         refDocDiv.AppendChild(refFieldNode);
@@ -188,7 +188,8 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     private static async Task<HtmlNode?> ConvertTokenToHtml(HtmlDocument doc, 
         JToken token, 
         string currentPath,
-        ConversionContext context)
+        ConversionContext context,
+        string entityId)
     {
         if (token is JObject obj)
         {
@@ -204,6 +205,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                         var imgElement = doc.CreateElement("img");
                         imgElement.SetAttributeValue("src", assetUrl);
                         imgElement.SetAttributeValue("data-json-path", currentPath);
+                        JsonToHtmlConverter.AddBlackbirdKey(imgElement, entityId, currentPath);
                         imgElement.SetAttributeValue("data-ref-id", refId);
                         return imgElement;
                     }
@@ -212,6 +214,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                         // Fallback to div if asset URL cannot be retrieved
                         var referenceDiv = doc.CreateElement("div");
                         referenceDiv.SetAttributeValue("data-json-path", currentPath);
+                        JsonToHtmlConverter.AddBlackbirdKey(referenceDiv, entityId, currentPath);
                         referenceDiv.SetAttributeValue("data-ref-id", refId);
                         referenceDiv.SetAttributeValue("class", "reference asset");
                         return referenceDiv;
@@ -221,6 +224,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 {
                     var referenceDiv = doc.CreateElement("div");
                     referenceDiv.SetAttributeValue("data-json-path", currentPath);
+                    JsonToHtmlConverter.AddBlackbirdKey(referenceDiv, entityId, currentPath);
                     referenceDiv.SetAttributeValue("data-ref-id", refId);
                     referenceDiv.SetAttributeValue("class", "reference");
                     
@@ -249,7 +253,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                                 continue;
                             
                             var refFieldPath = $"{refId}.{refProperty.Name}";
-                            var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, context);
+                            var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, context, entityId);
                             
                             if (refFieldNode != null)
                             {
@@ -262,11 +266,11 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 }
             }
 
-            return await ConvertObjectToHtml(doc, obj, currentPath, context);
+            return await ConvertObjectToHtml(doc, obj, currentPath, context, entityId);
         }
         else if (token is JArray arr)
         {
-            return await ConvertArrayToHtml(doc, arr, currentPath, context);
+            return await ConvertArrayToHtml(doc, arr, currentPath, context, entityId);
         }
         else if (token is JValue jValue)
         {
@@ -274,6 +278,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             {
                 var div = doc.CreateElement("div");
                 div.SetAttributeValue("data-json-path", currentPath);
+                JsonToHtmlConverter.AddBlackbirdKey(div, entityId, currentPath);
                 ApplySizeRestriction(div, currentPath, context.FieldRestrictions);
                 AppendTextWithLineBreaks(doc, div, jValue.ToString());
                 return div;
@@ -285,14 +290,15 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     }
 
     private static async Task<HtmlNode?> ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath,
-        ConversionContext context)
+        ConversionContext context, string entityId)
     {
         var typeValue = obj["_type"]?.ToString();
         
         if (typeValue == "block" || (obj.ContainsKey("children") && obj.ContainsKey("markDefs")))
         {
             var parentArray = new JArray { obj };
-            var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(parentArray, doc, currentPath, context.AssetService, context.DatasetId);
+            var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(parentArray, doc, currentPath, entityId,
+                context.AssetService, context.DatasetId);
             return richTextNode;
         }
 
@@ -308,7 +314,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 continue;
 
             string childPath = $"{currentPath}.{property.Name}";
-            var childNode = await ConvertTokenToHtml(doc, property.Value, childPath, context);
+            var childNode = await ConvertTokenToHtml(doc, property.Value, childPath, context, entityId);
             if (childNode != null)
             {
                 hasChildren = true;
@@ -320,14 +326,15 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     }
 
     private static async Task<HtmlNode?> ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath,
-        ConversionContext context)
+        ConversionContext context, string entityId)
     {
         if (arr.Count > 0 && arr[0] is JObject firstItem)
         {
             var firstType = firstItem["_type"]?.ToString();
             if (firstType == "block" || (firstItem.ContainsKey("children") && firstItem.ContainsKey("markDefs")))
             {
-                var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(arr, doc, currentPath, context.AssetService, context.DatasetId);
+                var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(arr, doc, currentPath, entityId,
+                    context.AssetService, context.DatasetId);
                 return richTextNode;
             }
         }
@@ -338,7 +345,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         {
             var item = arr[i];
             string childPath = $"{currentPath}[{i}]";
-            var childNode = await ConvertTokenToHtml(doc, item, childPath, context);
+            var childNode = await ConvertTokenToHtml(doc, item, childPath, context, entityId);
             if (childNode != null)
             {
                 hasChildren = true;

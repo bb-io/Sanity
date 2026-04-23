@@ -1077,7 +1077,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var strategy = Enum.Parse<LocalizationStrategy>(request.LocalizationStrategy);
         var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
         var sourceLanguage = content["language"]?.ToString() ?? request.SourceLanguage;
-        var exportMetadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, sourceLanguage, request.StudioUrl);
+        var exportMetadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, sourceLanguage);
 
         return await converter.ToHtmlAsync(
             content,
@@ -1143,12 +1143,13 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     private async Task<UploadContentResponse> CreateUploadOutputAsync(UpdateContentFromHtmlRequest request, string html,
         string sourceContentId, LocalizationStrategy localizationStrategy, Transformation? transformation, UploadContentResult result)
     {
-        var sourceUcid = ReleaseContentHelper.GetPublishedId(sourceContentId);
+        var sourceUcid = await ResolveUploadArtifactSourceUcidAsync(
+            sourceContentId,
+            request.GetDatasetIdOrDefault());
         var exportMetadata = BlackbirdExportMetadataFactory.Create(
             result.Content,
             result.ContentId,
             request.Locale,
-            request.StudioUrl,
             sourceUcid);
         var outputContent = transformation != null
             ? UploadContentArtifactBuilder.BuildTransformation(transformation, request.Locale, exportMetadata)
@@ -1162,6 +1163,22 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 result.ReferencedContents);
 
         return await UploadOutputFileAsync(request, result.ContentId, transformation != null, outputContent);
+    }
+
+    private async Task<string> ResolveUploadArtifactSourceUcidAsync(string sourceContentId, string datasetId)
+    {
+        if (!ReleaseContentHelper.IsVersionId(sourceContentId))
+        {
+            return ReleaseContentHelper.GetUploadArtifactSourceUcid(
+                sourceContentId,
+                publishedDocumentExists: false);
+        }
+
+        var publishedId = ReleaseContentHelper.GetPublishedId(sourceContentId);
+        var publishedEntries = await GetContentsByExactIdsAsync(datasetId, [publishedId]);
+        var publishedDocumentExists = publishedEntries.ContainsKey(publishedId);
+
+        return ReleaseContentHelper.GetUploadArtifactSourceUcid(sourceContentId, publishedDocumentExists);
     }
 
     private async Task<UploadContentResponse> UploadOutputFileAsync(UpdateContentFromHtmlRequest request, string contentId,

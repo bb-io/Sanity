@@ -8,8 +8,6 @@ public record BlackbirdExportMetadata
 
     public string? ContentName { get; init; }
 
-    public string? AdminUrl { get; init; }
-
     public string SystemName { get; init; } = string.Empty;
 
     public string SystemRef { get; init; } = string.Empty;
