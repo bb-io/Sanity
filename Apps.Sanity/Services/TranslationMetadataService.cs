@@ -1,4 +1,5 @@
 using Apps.Sanity.Api;
+using Apps.Sanity.Models;
 using Apps.Sanity.Models.Responses;
 using Blackbird.Applications.Sdk.Common.Authentication;
 using Blackbird.Applications.Sdk.Common.Exceptions;
@@ -95,18 +96,19 @@ public class TranslationMetadataService
         return response.Results[0].Id;
     }
 
-    public async Task CreateOrUpdateTranslationMetadataAsync(string baseDocumentId, string translatedDocumentId, 
-        string baseLanguage, string targetLanguage, string datasetId)
+    public async Task CreateOrUpdateTranslationMetadataAsync(string baseDocumentId, string translatedDocumentId,
+        string baseLanguage, string targetLanguage, string datasetId,
+        TranslationMetadataSchema schema = TranslationMetadataSchema.Default)
     {
         var existingMetadata = await GetTranslationMetadataAsync(baseDocumentId, datasetId);
 
         if (existingMetadata != null)
         {
-            await UpdateTranslationMetadataAsync(existingMetadata, translatedDocumentId, targetLanguage, datasetId);
+            await UpdateTranslationMetadataAsync(existingMetadata, translatedDocumentId, targetLanguage, datasetId, schema);
         }
         else
         {
-            await CreateTranslationMetadataAsync(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage, datasetId);
+            await CreateTranslationMetadataAsync(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage, datasetId, schema);
         }
     }
 
@@ -124,18 +126,19 @@ public class TranslationMetadataService
     }
 
     public async Task<JObject> BuildTranslationMetadataContentAsync(string baseDocumentId, string translatedDocumentId,
-        string baseLanguage, string targetLanguage, string datasetId)
+        string baseLanguage, string targetLanguage, string datasetId,
+        TranslationMetadataSchema schema = TranslationMetadataSchema.Default)
     {
         var existingMetadata = await GetTranslationMetadataAsync(baseDocumentId, datasetId);
         return existingMetadata == null
-            ? CreateNewTranslationMetadataContent(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage)
-            : UpdateExistingTranslationMetadataContent(existingMetadata, translatedDocumentId, targetLanguage);
+            ? CreateNewTranslationMetadataContent(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage, schema)
+            : UpdateExistingTranslationMetadataContent(existingMetadata, translatedDocumentId, targetLanguage, schema);
     }
 
     private async Task CreateTranslationMetadataAsync(string baseDocumentId, string translatedDocumentId,
-        string baseLanguage, string targetLanguage, string datasetId)
+        string baseLanguage, string targetLanguage, string datasetId, TranslationMetadataSchema schema)
     {
-        var metadata = CreateNewTranslationMetadataContent(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage);
+        var metadata = CreateNewTranslationMetadataContent(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage, schema);
         metadata.Remove("_id");
 
         var mutation = new JObject
@@ -162,10 +165,10 @@ public class TranslationMetadataService
         }
     }
 
-    private async Task UpdateTranslationMetadataAsync(JObject existingMetadata, string translatedDocumentId, 
-        string targetLanguage, string datasetId)
+    private async Task UpdateTranslationMetadataAsync(JObject existingMetadata, string translatedDocumentId,
+        string targetLanguage, string datasetId, TranslationMetadataSchema schema)
     {
-        var metadata = UpdateExistingTranslationMetadataContent(existingMetadata, translatedDocumentId, targetLanguage);
+        var metadata = UpdateExistingTranslationMetadataContent(existingMetadata, translatedDocumentId, targetLanguage, schema);
         var metadataId = metadata["_id"]?.ToString();
 
         var mutation = new JObject
@@ -200,7 +203,7 @@ public class TranslationMetadataService
     }
 
     private static JObject CreateNewTranslationMetadataContent(string baseDocumentId, string translatedDocumentId,
-        string baseLanguage, string targetLanguage)
+        string baseLanguage, string targetLanguage, TranslationMetadataSchema schema)
     {
         return new JObject
         {
@@ -208,14 +211,14 @@ public class TranslationMetadataService
             ["_type"] = "translation.metadata",
             ["translations"] = new JArray
             {
-                CreateTranslationReference(baseLanguage, baseDocumentId),
-                CreateTranslationReference(targetLanguage, translatedDocumentId)
+                CreateTranslationReference(baseLanguage, baseDocumentId, schema),
+                CreateTranslationReference(targetLanguage, translatedDocumentId, schema)
             }
         };
     }
 
     private static JObject UpdateExistingTranslationMetadataContent(JObject existingMetadata, string translatedDocumentId,
-        string targetLanguage)
+        string targetLanguage, TranslationMetadataSchema schema)
     {
         var metadata = (JObject)existingMetadata.DeepClone();
         var metadataId = metadata["_id"]?.ToString();
@@ -225,9 +228,10 @@ public class TranslationMetadataService
         }
 
         var translations = metadata["translations"] as JArray ?? new JArray();
+        var matchFieldName = schema == TranslationMetadataSchema.Legacy ? "language" : "_key";
         var existingTranslation = translations
             .OfType<JObject>()
-            .FirstOrDefault(t => t["_key"]?.ToString() == targetLanguage);
+            .FirstOrDefault(t => t[matchFieldName]?.ToString() == targetLanguage);
 
         if (existingTranslation != null)
         {
@@ -239,23 +243,38 @@ public class TranslationMetadataService
         }
         else
         {
-            translations.Add(CreateTranslationReference(targetLanguage, translatedDocumentId));
+            translations.Add(CreateTranslationReference(targetLanguage, translatedDocumentId, schema));
         }
 
         metadata["translations"] = translations;
         return metadata;
     }
 
-    private static JObject CreateTranslationReference(string language, string documentId)
+    private const string LegacyTranslationEntryType = "translation";
+
+    private static JObject CreateTranslationReference(string language, string documentId, TranslationMetadataSchema schema)
     {
+        var value = new JObject
+        {
+            ["_type"] = "reference",
+            ["_ref"] = documentId
+        };
+
+        if (schema == TranslationMetadataSchema.Legacy)
+        {
+            return new JObject
+            {
+                ["_key"] = Guid.NewGuid().ToString(),
+                ["_type"] = LegacyTranslationEntryType,
+                ["language"] = language,
+                ["value"] = value
+            };
+        }
+
         return new JObject
         {
             ["_key"] = language,
-            ["value"] = new JObject
-            {
-                ["_type"] = "reference",
-                ["_ref"] = documentId
-            }
+            ["value"] = value
         };
     }
 }
