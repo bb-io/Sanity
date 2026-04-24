@@ -19,7 +19,8 @@ public static class RichTextToHtmlConvertor
         {
             if (block is JObject blockObj)
             {
-                var blockNode = ProcessBlock(blockObj, doc, $"{currentPath}", assetService, datasetId);
+                var blockIndex = jToken.IndexOf(block);
+                var blockNode = ProcessBlock(blockObj, doc, $"{currentPath}", blockIndex, assetService, datasetId);
                 wrapper.AppendChild(blockNode);
             }
         }
@@ -27,25 +28,28 @@ public static class RichTextToHtmlConvertor
         return wrapper;
     }
 
-    private static HtmlNode ProcessBlock(JObject block, HtmlDocument doc, string basePath, AssetService assetService, string datasetId)
+    private static HtmlNode ProcessBlock(JObject block, HtmlDocument doc, string basePath, int blockIndex,
+        AssetService assetService, string datasetId)
     {
         var blockType = block["_type"]?.ToString();
         var blockKey = block["_key"]?.ToString();
         var blockPath = $"{basePath}[?(@._key=='{blockKey}')]";
+        var blockJsonPath = $"{basePath}[{blockIndex}]";
 
         switch (blockType)
         {
             case "block":
                 return ProcessTextBlock(block, doc, blockPath);
             case "image":
-                return ProcessImageBlock(block, doc, blockPath, assetService, datasetId);
+                return ProcessImageBlock(block, doc, blockPath, blockJsonPath, assetService, datasetId);
             case "reference":
             case "snippet-ref":
                 return ProcessReferenceBlock(block, doc, blockPath);
             default:
                 if (block["content"] is JArray contentArray)
                 {
-                    return ProcessCustomBlock(block, doc, blockPath, assetService, datasetId);
+                    return ProcessCustomBlock(block, doc, blockPath, blockJsonPath, contentArray, assetService,
+                        datasetId);
                 }
                 
                 var unknownNode = doc.CreateElement("div");
@@ -215,8 +219,14 @@ public static class RichTextToHtmlConvertor
         }
     }
 
-    private static HtmlNode ProcessImageBlock(JObject block, HtmlDocument doc, string blockPath, AssetService assetService, string datasetId)
+    private static HtmlNode ProcessImageBlock(JObject block, HtmlDocument doc, string blockPath, string blockJsonPath,
+        AssetService assetService, string datasetId)
     {
+        var container = doc.CreateElement("div");
+        container.SetAttributeValue("data-block-path", blockPath);
+        container.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
+        container.SetAttributeValue("data-type", block["_type"]?.ToString() ?? "image");
+
         var imgNode = doc.CreateElement("img");
         imgNode.SetAttributeValue("translate", "no");
         imgNode.SetAttributeValue("style", "height: auto; max-width: 50%;");
@@ -245,9 +255,21 @@ public static class RichTextToHtmlConvertor
             }
         }
         
-        imgNode.SetAttributeValue("data-block-path", blockPath);
-        imgNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
-        return imgNode;
+        container.AppendChild(imgNode);
+
+        if (block["alt"] is JValue altValue && altValue.Type == JTokenType.String)
+        {
+            var altText = altValue.ToString();
+            if (!string.IsNullOrEmpty(altText))
+            {
+                var altNode = doc.CreateElement("div");
+                altNode.SetAttributeValue("data-json-path", $"{blockJsonPath}.alt");
+                altNode.AppendChild(doc.CreateTextNode(altText));
+                container.AppendChild(altNode);
+            }
+        }
+
+        return container;
     }
 
     private static HtmlNode ProcessReferenceBlock(JObject block, HtmlDocument doc, string blockPath)
@@ -269,7 +291,8 @@ public static class RichTextToHtmlConvertor
         return refNode;
     }
 
-    private static HtmlNode ProcessCustomBlock(JObject block, HtmlDocument doc, string blockPath, AssetService assetService, string datasetId)
+    private static HtmlNode ProcessCustomBlock(JObject block, HtmlDocument doc, string blockPath, string blockJsonPath,
+        JArray contentArray, AssetService assetService, string datasetId)
     {
         var customNode = doc.CreateElement("div");
         customNode.SetAttributeValue("data-block-path", blockPath);
@@ -279,23 +302,76 @@ public static class RichTextToHtmlConvertor
         var blockCopy = (JObject)block.DeepClone();
         blockCopy.Remove("content");
         customNode.SetAttributeValue("data-original-block", blockCopy.ToString(Newtonsoft.Json.Formatting.None));
+
+        AppendStringLeaves(block, customNode, doc, blockJsonPath, ["content"]);
         
-        var contentArray = block["content"] as JArray;
-        if (contentArray != null)
+        for (int i = 0; i < contentArray.Count; i++)
         {
-            foreach (var contentBlock in contentArray)
+            var contentBlock = contentArray[i];
+            if (contentBlock is JObject contentBlockObj)
             {
-                if (contentBlock is JObject contentBlockObj)
+                var childNode = ProcessBlock(contentBlockObj, doc, blockJsonPath + ".content", i, assetService,
+                    datasetId);
+                if (childNode != null)
                 {
-                    var childNode = ProcessBlock(contentBlockObj, doc, blockPath + ".content", assetService, datasetId);
-                    if (childNode != null)
-                    {
-                        customNode.AppendChild(childNode);
-                    }
+                    customNode.AppendChild(childNode);
                 }
             }
         }
         
         return customNode;
+    }
+
+    private static void AppendStringLeaves(JToken token, HtmlNode parentNode, HtmlDocument doc, string currentPath,
+        HashSet<string>? excludedPropertyNames = null)
+    {
+        if (token is JValue value)
+        {
+            if (value.Type != JTokenType.String)
+            {
+                return;
+            }
+
+            var text = value.ToString();
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            var textNode = doc.CreateElement("div");
+            textNode.SetAttributeValue("data-json-path", currentPath);
+            textNode.AppendChild(doc.CreateTextNode(text));
+            parentNode.AppendChild(textNode);
+            return;
+        }
+
+        if (token is JObject obj)
+        {
+            foreach (var property in obj.Properties())
+            {
+                if (property.Name.StartsWith("_"))
+                {
+                    continue;
+                }
+
+                if (excludedPropertyNames != null && excludedPropertyNames.Contains(property.Name))
+                {
+                    continue;
+                }
+
+                AppendStringLeaves(property.Value, parentNode, doc, $"{currentPath}.{property.Name}",
+                    excludedPropertyNames);
+            }
+
+            return;
+        }
+
+        if (token is JArray array)
+        {
+            for (var i = 0; i < array.Count; i++)
+            {
+                AppendStringLeaves(array[i], parentNode, doc, $"{currentPath}[{i}]", excludedPropertyNames);
+            }
+        }
     }
 }

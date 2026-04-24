@@ -216,7 +216,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 if (string.IsNullOrEmpty(path)) continue;
 
                 // Skip if path ends with an excluded field name
-                if (excludedFieldNames != null && IsPathExcluded(path, excludedFieldNames))
+                if (excludedFieldNames != null && ShouldSkipExcludedPath(path, excludedFieldNames, translatedContent))
                     continue;
 
                 // Get original value at this path to determine if it was an array or a single object
@@ -252,7 +252,7 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
                 if (dataJsonPath == null) continue;
 
                 // Skip if path ends with an excluded field name
-                if (excludedFieldNames != null && IsPathExcluded(dataJsonPath, excludedFieldNames))
+                if (excludedFieldNames != null && ShouldSkipExcludedPath(dataJsonPath, excludedFieldNames, translatedContent))
                     continue;
 
                 var newText = ExtractTextPreservingLineBreaks(node);
@@ -281,6 +281,19 @@ public class DocumentLevelHtmlToJsonConverter : IHtmlToJsonConverter
             fieldName = fieldName.Substring(0, bracketIndex);
         
         return excludedFieldNames.Contains(fieldName);
+    }
+
+    private static bool ShouldSkipExcludedPath(string path, HashSet<string> excludedFieldNames, JObject translatedContent)
+    {
+        if (!IsPathExcluded(path, excludedFieldNames))
+        {
+            return false;
+        }
+
+        var existingValue = GetNestedProperty(translatedContent, path);
+
+        // Keep excluded non-string fields immutable while allowing string leaves to flow through.
+        return existingValue == null || existingValue.Type != JTokenType.String;
     }
 
     private static JArray ConvertRichTextFromHtml(HtmlNode richTextNode, JArray? originalRichTextArray = null)
