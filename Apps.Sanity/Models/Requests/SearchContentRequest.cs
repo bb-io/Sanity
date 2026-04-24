@@ -2,6 +2,7 @@
 using Apps.Sanity.Utils;
 using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Dictionaries;
+using Newtonsoft.Json;
 
 namespace Apps.Sanity.Models.Requests;
 
@@ -9,6 +10,9 @@ public class SearchContentRequest : DatasetIdentifier
 {
     [Display("Content types")] 
     public IEnumerable<string>? Types { get; set; }
+
+    [Display("Language", Description = "Filters content by the document language field.")]
+    public string? Language { get; set; }
 
     [Display("Updated after")] 
     public DateTime? UpdatedAfter { get; set; }
@@ -42,6 +46,12 @@ public class SearchContentRequest : DatasetIdentifier
             groq = GroqQueryBuilder.AddParameter(groq, parameter);
         }
 
+        if (!string.IsNullOrWhiteSpace(Language))
+        {
+            var parameter = $"language == {SerializeString(Language.Trim())}";
+            groq = GroqQueryBuilder.AddParameter(groq, parameter);
+        }
+
         if (UpdatedAfter.HasValue)
         {
             var parameter = $"dateTime(_updatedAt) > dateTime('{UpdatedAfter.Value:yyyy-MM-ddTHH:mm:ssZ}')";
@@ -55,5 +65,10 @@ public class SearchContentRequest : DatasetIdentifier
         }
         
         return queryParameter.Replace("&", "%26").Replace("GROQ", groq);
+    }
+
+    private static string SerializeString(string value)
+    {
+        return JsonConvert.SerializeObject(value);
     }
 }

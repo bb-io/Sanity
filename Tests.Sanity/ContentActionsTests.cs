@@ -35,6 +35,34 @@ public class ContentActionsTests : TestBase
     }
 
     [TestMethod]
+    public async Task SearchContent_WithLanguageInputParameter_ShouldNotThrowAnError()
+    {
+        const string language = "de";
+        var request = new SearchContentRequest
+        {
+            Language = language
+        };
+
+        await VerifySearchContentAsync(request,
+            result =>
+            {
+                return Task.Run(() =>
+                    result.Items.Should().AllSatisfy(x => x.Language.Should().Be(language)));
+            });
+    }
+
+    [TestMethod]
+    public void SearchContent_WithLanguageInputParameter_ShouldBuildLanguageFilter()
+    {
+        var request = new SearchContentRequest
+        {
+            Language = "de"
+        };
+
+        request.BuildGroqQuery().Should().Be("?query=*[language == \"de\"]");
+    }
+
+    [TestMethod]
     public async Task SearchContent_WithCreatedAtInputParameters_ShouldNotThrowAnError()
     {
         var createdAfter = DateTime.Parse("2024-12-12T09:31:18Z").ToUniversalTime();
