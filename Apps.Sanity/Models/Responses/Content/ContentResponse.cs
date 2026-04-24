@@ -12,6 +12,9 @@ public class ContentResponse : IDownloadContentInput
     [Display("Content type"), JsonProperty("_type")]
     public string Type { get; set; } = string.Empty;
 
+    [Display("Language"), JsonProperty("language")]
+    public string? Language { get; set; }
+
     [Display("Created at"), JsonProperty("_createdAt")]
     public DateTime CreatedAt { get; set; }
     
