@@ -22,6 +22,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         public List<FieldSizeRestriction>? FieldRestrictions { get; set; }
         public Dictionary<string, JObject>? ReferencedEntries { get; set; }
         public HashSet<string> ExcludedFields { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> StrictExcludedFields { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<string> ToHtmlAsync(JObject jObject, 
@@ -52,7 +53,8 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             DatasetId = datasetId,
             FieldRestrictions = fieldRestrictions,
             ReferencedEntries = referencedEntries,
-            ExcludedFields = allExcludedFields
+            ExcludedFields = allExcludedFields,
+            StrictExcludedFields = new HashSet<string>(DefaultExcludedFields, StringComparer.OrdinalIgnoreCase)
         };
 
         var doc = new HtmlDocument();
@@ -115,7 +117,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         {
             var propName = property.Name;
             
-            if (allExcludedFields.Contains(propName))
+            if (context.StrictExcludedFields.Contains(propName))
             {
                 continue;
             }
@@ -157,7 +159,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
 
                 foreach (var refProperty in refContent.Properties())
                 {
-                    if (allExcludedFields.Contains(refProperty.Name))
+                    if (context.StrictExcludedFields.Contains(refProperty.Name))
                         continue;
 
                     var refFieldPath = $"{refProperty.Name}";
@@ -249,7 +251,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                         // Non-localizable reference - include content inline (old behavior)
                         foreach (var refProperty in refContent.Properties())
                         {
-                            if (context.ExcludedFields.Contains(refProperty.Name))
+                            if (context.StrictExcludedFields.Contains(refProperty.Name))
                                 continue;
                             
                             var refFieldPath = $"{refId}.{refProperty.Name}";
@@ -310,7 +312,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             if (property.Name.StartsWith("_"))
                 continue;
 
-            if (context.ExcludedFields.Contains(property.Name))
+            if (context.StrictExcludedFields.Contains(property.Name))
                 continue;
 
             string childPath = $"{currentPath}.{property.Name}";
