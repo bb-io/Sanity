@@ -1,7 +1,6 @@
 ﻿using Apps.Sanity.Models.Identifiers;
 using Apps.Sanity.Utils;
 using Blackbird.Applications.Sdk.Common;
-using Blackbird.Applications.Sdk.Common.Dictionaries;
 using Newtonsoft.Json;
 
 namespace Apps.Sanity.Models.Requests;
@@ -33,17 +32,24 @@ public class SearchContentRequest : DatasetIdentifier
         var queryParameter = "?query=*[GROQ]";
         if (!string.IsNullOrEmpty(GroqQuery))
         {
-            return queryParameter.Replace("GROQ", GroqQuery.Replace("&", "%26"));
+            return queryParameter.Replace("GROQ", EncodeGroqQuery(GroqQuery));
         }
 
         var groq = string.Empty;
         
         if (Types != null)
         {
-            var wrappedTypes = Types.Select(x => $"'{x}'").ToList();
-            var joinedString = string.Join(",", wrappedTypes);
-            var parameter = $"_type in [{joinedString}]";
-            groq = GroqQueryBuilder.AddParameter(groq, parameter);
+            var wrappedTypes = Types
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => $"'{x.Trim()}'")
+                .ToList();
+
+            if (wrappedTypes.Any())
+            {
+                var joinedString = string.Join(",", wrappedTypes);
+                var parameter = $"_type in [{joinedString}]";
+                groq = GroqQueryBuilder.AddParameter(groq, parameter);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(Language))
@@ -64,11 +70,16 @@ public class SearchContentRequest : DatasetIdentifier
             groq = GroqQueryBuilder.AddParameter(groq, parameter);
         }
         
-        return queryParameter.Replace("&", "%26").Replace("GROQ", groq);
+        return queryParameter.Replace("GROQ", EncodeGroqQuery(groq));
     }
 
     private static string SerializeString(string value)
     {
         return JsonConvert.SerializeObject(value);
+    }
+
+    private static string EncodeGroqQuery(string query)
+    {
+        return query.Replace("&", "%26");
     }
 }
