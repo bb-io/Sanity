@@ -7,7 +7,9 @@ namespace Apps.Sanity.Utils;
 public static class RichTextToHtmlConvertor
 {
     public static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath, string entityId,
-        AssetService assetService, string datasetId)
+        AssetService assetService, string datasetId,
+        HashSet<string>? excludedFields = null,
+        HashSet<string>? strictExcludedFields = null)
     {
         var wrapper = doc.CreateElement("div");
         wrapper.SetAttributeValue("data-json-path", currentPath);
@@ -20,7 +22,8 @@ public static class RichTextToHtmlConvertor
             if (block is JObject blockObj)
             {
                 var blockIndex = jToken.IndexOf(block);
-                var blockNode = ProcessBlock(blockObj, doc, $"{currentPath}", blockIndex, assetService, datasetId);
+                var blockNode = ProcessBlock(blockObj, doc, $"{currentPath}", blockIndex, assetService, datasetId,
+                    excludedFields, strictExcludedFields);
                 wrapper.AppendChild(blockNode);
             }
         }
@@ -29,7 +32,9 @@ public static class RichTextToHtmlConvertor
     }
 
     private static HtmlNode ProcessBlock(JObject block, HtmlDocument doc, string basePath, int blockIndex,
-        AssetService assetService, string datasetId)
+        AssetService assetService, string datasetId,
+        HashSet<string>? excludedFields,
+        HashSet<string>? strictExcludedFields)
     {
         var blockType = block["_type"]?.ToString();
         var blockKey = block["_key"]?.ToString();
@@ -41,7 +46,8 @@ public static class RichTextToHtmlConvertor
             case "block":
                 return ProcessTextBlock(block, doc, blockPath);
             case "image":
-                return ProcessImageBlock(block, doc, blockPath, blockJsonPath, assetService, datasetId);
+                return ProcessImageBlock(block, doc, blockPath, blockJsonPath, assetService, datasetId,
+                    excludedFields, strictExcludedFields);
             case "reference":
             case "snippet-ref":
                 return ProcessReferenceBlock(block, doc, blockPath);
@@ -49,7 +55,7 @@ public static class RichTextToHtmlConvertor
                 if (block["content"] is JArray contentArray)
                 {
                     return ProcessCustomBlock(block, doc, blockPath, blockJsonPath, contentArray, assetService,
-                        datasetId);
+                        datasetId, excludedFields, strictExcludedFields);
                 }
                 
                 var unknownNode = doc.CreateElement("div");
@@ -220,7 +226,9 @@ public static class RichTextToHtmlConvertor
     }
 
     private static HtmlNode ProcessImageBlock(JObject block, HtmlDocument doc, string blockPath, string blockJsonPath,
-        AssetService assetService, string datasetId)
+        AssetService assetService, string datasetId,
+        HashSet<string>? excludedFields,
+        HashSet<string>? strictExcludedFields)
     {
         var container = doc.CreateElement("div");
         container.SetAttributeValue("data-block-path", blockPath);
@@ -257,7 +265,8 @@ public static class RichTextToHtmlConvertor
         
         container.AppendChild(imgNode);
 
-        if (block["alt"] is JValue altValue && altValue.Type == JTokenType.String)
+        if (!ShouldSkipPropertyByExclusion("alt", block["alt"], excludedFields, strictExcludedFields)
+            && block["alt"] is JValue altValue && altValue.Type == JTokenType.String)
         {
             var altText = altValue.ToString();
             if (!string.IsNullOrEmpty(altText))
@@ -292,7 +301,9 @@ public static class RichTextToHtmlConvertor
     }
 
     private static HtmlNode ProcessCustomBlock(JObject block, HtmlDocument doc, string blockPath, string blockJsonPath,
-        JArray contentArray, AssetService assetService, string datasetId)
+        JArray contentArray, AssetService assetService, string datasetId,
+        HashSet<string>? excludedFields,
+        HashSet<string>? strictExcludedFields)
     {
         var customNode = doc.CreateElement("div");
         customNode.SetAttributeValue("data-block-path", blockPath);
@@ -303,7 +314,8 @@ public static class RichTextToHtmlConvertor
         blockCopy.Remove("content");
         customNode.SetAttributeValue("data-original-block", blockCopy.ToString(Newtonsoft.Json.Formatting.None));
 
-        AppendStringLeaves(block, customNode, doc, blockJsonPath, ["content"]);
+        AppendStringLeaves(block, customNode, doc, blockJsonPath, ["content"], excludedFields,
+            strictExcludedFields);
         
         for (int i = 0; i < contentArray.Count; i++)
         {
@@ -311,7 +323,7 @@ public static class RichTextToHtmlConvertor
             if (contentBlock is JObject contentBlockObj)
             {
                 var childNode = ProcessBlock(contentBlockObj, doc, blockJsonPath + ".content", i, assetService,
-                    datasetId);
+                    datasetId, excludedFields, strictExcludedFields);
                 if (childNode != null)
                 {
                     customNode.AppendChild(childNode);
@@ -323,7 +335,9 @@ public static class RichTextToHtmlConvertor
     }
 
     private static void AppendStringLeaves(JToken token, HtmlNode parentNode, HtmlDocument doc, string currentPath,
-        HashSet<string>? excludedPropertyNames = null)
+        HashSet<string>? excludedPropertyNames = null,
+        HashSet<string>? excludedFields = null,
+        HashSet<string>? strictExcludedFields = null)
     {
         if (token is JValue value)
         {
@@ -359,8 +373,13 @@ public static class RichTextToHtmlConvertor
                     continue;
                 }
 
+                if (ShouldSkipPropertyByExclusion(property.Name, property.Value, excludedFields, strictExcludedFields))
+                {
+                    continue;
+                }
+
                 AppendStringLeaves(property.Value, parentNode, doc, $"{currentPath}.{property.Name}",
-                    excludedPropertyNames);
+                    excludedPropertyNames, excludedFields, strictExcludedFields);
             }
 
             return;
@@ -370,8 +389,35 @@ public static class RichTextToHtmlConvertor
         {
             for (var i = 0; i < array.Count; i++)
             {
-                AppendStringLeaves(array[i], parentNode, doc, $"{currentPath}[{i}]", excludedPropertyNames);
+                AppendStringLeaves(array[i], parentNode, doc, $"{currentPath}[{i}]", excludedPropertyNames,
+                    excludedFields, strictExcludedFields);
             }
         }
+    }
+
+    private static bool ShouldSkipPropertyByExclusion(string propertyName, JToken? propertyValue,
+        HashSet<string>? excludedFields, HashSet<string>? strictExcludedFields)
+    {
+        if (strictExcludedFields != null && strictExcludedFields.Contains(propertyName))
+        {
+            return true;
+        }
+
+        if (excludedFields == null || !excludedFields.Contains(propertyName))
+        {
+            return false;
+        }
+
+        if (propertyValue is JObject)
+        {
+            return false;
+        }
+
+        if (propertyValue is JArray arr)
+        {
+            return !arr.Any(item => item is JObject || item is JArray);
+        }
+
+        return true;
     }
 }

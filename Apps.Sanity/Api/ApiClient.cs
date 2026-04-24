@@ -10,8 +10,8 @@ namespace Apps.Sanity.Api;
 public class ApiClient(IEnumerable<AuthenticationCredentialsProvider> authenticationCredentialsProviders) : BlackBirdRestClient(new()
     {
         BaseUrl = authenticationCredentialsProviders.BuildUri(),
-        ThrowOnAnyError = false
-    })
+        ThrowOnAnyError = false,
+    }) 
 {
     public override async Task<T> ExecuteWithErrorHandling<T>(RestRequest request)
     {
