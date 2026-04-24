@@ -116,8 +116,9 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         foreach (var property in properties)
         {
             var propName = property.Name;
+            var propValue = property.Value;
             
-            if (context.StrictExcludedFields.Contains(propName))
+            if (ShouldSkipPropertyByExclusion(propName, propValue, context))
             {
                 continue;
             }
@@ -129,7 +130,6 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                 continue;
             }
 
-            var propValue = property.Value;
             var convertedNode = await ConvertTokenToHtml(doc, propValue, propName, context, contentId);
             if (convertedNode != null)
             {
@@ -159,7 +159,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
 
                 foreach (var refProperty in refContent.Properties())
                 {
-                    if (context.StrictExcludedFields.Contains(refProperty.Name))
+                    if (ShouldSkipPropertyByExclusion(refProperty.Name, refProperty.Value, context))
                         continue;
 
                     var refFieldPath = $"{refProperty.Name}";
@@ -251,7 +251,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
                         // Non-localizable reference - include content inline (old behavior)
                         foreach (var refProperty in refContent.Properties())
                         {
-                            if (context.StrictExcludedFields.Contains(refProperty.Name))
+                            if (ShouldSkipPropertyByExclusion(refProperty.Name, refProperty.Value, context))
                                 continue;
                             
                             var refFieldPath = $"{refId}.{refProperty.Name}";
@@ -300,7 +300,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         {
             var parentArray = new JArray { obj };
             var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(parentArray, doc, currentPath, entityId,
-                context.AssetService, context.DatasetId);
+                context.AssetService, context.DatasetId, context.ExcludedFields, context.StrictExcludedFields);
             return richTextNode;
         }
 
@@ -312,7 +312,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             if (property.Name.StartsWith("_"))
                 continue;
 
-            if (context.StrictExcludedFields.Contains(property.Name))
+            if (ShouldSkipPropertyByExclusion(property.Name, property.Value, context))
                 continue;
 
             string childPath = $"{currentPath}.{property.Name}";
@@ -336,7 +336,7 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             if (firstType == "block" || (firstItem.ContainsKey("children") && firstItem.ContainsKey("markDefs")))
             {
                 var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(arr, doc, currentPath, entityId,
-                    context.AssetService, context.DatasetId);
+                    context.AssetService, context.DatasetId, context.ExcludedFields, context.StrictExcludedFields);
                 return richTextNode;
             }
         }
@@ -377,6 +377,31 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
     private static string EscapeHtml(string text)
     {
         return System.Net.WebUtility.HtmlEncode(text);
+    }
+
+    private static bool ShouldSkipPropertyByExclusion(string propertyName, JToken propertyValue, ConversionContext context)
+    {
+        if (context.StrictExcludedFields.Contains(propertyName))
+        {
+            return true;
+        }
+
+        if (!context.ExcludedFields.Contains(propertyName))
+        {
+            return false;
+        }
+
+        if (propertyValue is JObject)
+        {
+            return false;
+        }
+
+        if (propertyValue is JArray arr)
+        {
+            return !arr.Any(item => item is JObject || item is JArray);
+        }
+
+        return true;
     }
 
     private static void ApplySizeRestriction(HtmlNode node, string currentPath, List<FieldSizeRestriction>? fieldRestrictions)
