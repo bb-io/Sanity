@@ -26,7 +26,6 @@ using Newtonsoft.Json.Linq;
 using RestSharp;
 using HtmlAgilityPack;
 
-
 namespace Apps.Sanity.Actions;
 
 [ActionList("Content")]
@@ -210,6 +209,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         var datasetId = request.GetDatasetIdOrDefault();
         var releaseName = request.ReleaseName!;
+        var publish = request.Publish ?? false;
         var mainContent = await GetReleaseAwareContentAsync(contentId, datasetId);
 
         var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc)
@@ -232,7 +232,18 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             releasePatches = patchArray
                 .OfType<JObject>()
-                .Select(x => RetargetPatchToRelease(x, releaseName))
+                .Select(x => 
+                {
+                    var patched = RetargetPatchToRelease(x, releaseName);
+                    if (publish) 
+                        return patched;
+                    
+                    var id = patched["patch"]?["id"]?.ToString();
+                    if (id != null && !id.StartsWith("drafts."))
+                        patched["patch"]["id"] = DraftContentHelper.GetDraftId(id);
+                    
+                    return patched;
+                })
                 .ToList();
         }
 
@@ -283,6 +294,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     {
         var datasetId = request.GetDatasetIdOrDefault();
         var releaseName = request.ReleaseName!;
+        var publish = request.Publish ?? false;
         var translationService = new TranslationMetadataService(Client, Creds);
 
         var basePublishedDocumentId = ReleaseContentHelper.GetPublishedId(baseDocumentId);
@@ -296,6 +308,23 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var existingTranslations = await translationService.GetTranslationsAsync(basePublishedDocumentId, datasetId);
+        if (!existingTranslations.ContainsKey(request.Locale))
+        {
+            string releaseDocsQuery = 
+                $"*[_type == \"{baseDocument["_type"]}\" && language == \"{request.Locale}\" && _id in path(\"**versions.{releaseName}.*\")]";
+            var releaseDocs = await SearchContentAsJObjectAsync(new()
+                {
+                    DatasetId = datasetId, 
+                    GroqQuery = releaseDocsQuery
+                }
+            );
+    
+            if (releaseDocs.Count > 0)
+            {
+                var existingReleaseDocId = releaseDocs.First()["_id"].ToString();
+                existingTranslations[request.Locale] = ReleaseContentHelper.GetPublishedId(DraftContentHelper.GetPublishedId(existingReleaseDocId));
+            }
+        }
         var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.DocumentLevel);
         var mutationResult = converter.ToJsonPatches(html, baseDocument, request.Locale, true, null);
 
@@ -360,12 +389,17 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var translatedDocumentId = existingTranslations.TryGetValue(request.Locale, out var existingTranslatedDocId)
             ? existingTranslatedDocId
             : GenerateLocalizedDocumentId();
+        
+        var targetMainReleaseId = ReleaseContentHelper.BuildVersionId(releaseName, translatedDocumentId);
+        if (!publish)
+            targetMainReleaseId = DraftContentHelper.GetDraftId(targetMainReleaseId);
 
         var localizedMainContent = PrepareLocalizedDocumentForRelease(
             mainMutation.Content,
-            translatedDocumentId,
+            targetMainReleaseId,
             request.Locale,
             baseDocument["_type"]?.ToString());
+        localizedMainContent["_id"] = targetMainReleaseId;
 
         releaseDocuments.Add(localizedMainContent);
 
@@ -394,6 +428,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
     private async Task<UploadContentResult> UpdateContentDocumentLevelAsync(UpdateContentFromHtmlRequest request, string html, string baseDocumentId, TranslationMetadataSchema translationMetadataSchema)
     {
+        var publish = request.Publish ?? false;
         var translationService = new TranslationMetadataService(Client, Creds);
         
         var baseDocumentObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
@@ -418,7 +453,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var existingTranslations = await translationService.GetTranslationsAsync(baseDocumentId, request.GetDatasetIdOrDefault());
         
         var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.DocumentLevel);
-        var mutationResult = converter.ToJsonPatches(html, baseDocument, request.Locale, request.Publish ?? false, null);
+        var mutationResult = converter.ToJsonPatches(html, baseDocument, request.Locale, publish, null);
 
         if (mutationResult.Mutations.Count == 0)
         {
@@ -454,8 +489,18 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             {
                 // Update existing translated reference document
                 localizedRefId = existingLocalizedRefId;
+                var targetPatchId = publish ? localizedRefId : DraftContentHelper.GetDraftId(localizedRefId);
+
+                if (!publish)
+                {
+                    var publishedContentList = await _draftHelper.GetContentWithDraftFallbackAsync(
+                        localizedRefId, 
+                        request.GetDatasetIdOrDefault());
+                    
+                    if (publishedContentList.Count > 0)
+                        await EnsureDraftExistsAsync(request, localizedRefId, publishedContentList.First());
+                }
                 
-                // Remove immutable/system fields before patching
                 var patchContent = (JObject)refMutation.Content.DeepClone();
                 patchContent.Remove("_id");
                 patchContent.Remove("_type");
@@ -474,7 +519,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                         {
                             ["patch"] = new JObject
                             {
-                                ["id"] = localizedRefId,
+                                ["id"] = targetPatchId,
                                 ["set"] = patchContent
                             }
                         }
@@ -501,31 +546,38 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 var baseRefLanguage = baseRefDoc.First()["language"]?.ToString() ?? baseLanguage;
                 var baseRefType = baseRefDoc.First()["_type"]?.ToString();
                 
-                // Prepare content for creation - remove immutable fields
+                localizedRefId = GenerateLocalizedDocumentId();
+                var targetCreateId = publish ? localizedRefId : DraftContentHelper.GetDraftId(localizedRefId);
+
                 var createContent = (JObject)refMutation.Content.DeepClone();
-                createContent.Remove("_id"); // Remove old _id, Sanity will generate new one
+                createContent.Remove("_id");
                 createContent.Remove("_rev");
                 createContent.Remove("_createdAt");
                 createContent.Remove("_updatedAt");
-                
-                // Set required fields for the translated referenced document
+                createContent["_id"] = targetCreateId;
                 createContent["language"] = request.Locale;
                 if (!string.IsNullOrEmpty(baseRefType))
                 {
                     createContent["_type"] = baseRefType;
                 }
                 
-                try
+                var createMutation = new JObject
                 {
-                    localizedRefId = await translationService.CreateTranslatedDocumentAsync(
-                        request.GetDatasetIdOrDefault(), 
-                        createContent);
-                }
-                catch (Exception ex)
-                {
-                    throw new PluginApplicationException($"Failed to create translated referenced document. Error: {ex.Message}", ex);
-                }
+                    ["mutations"] = new JArray
+                    {
+                        new JObject
+                        {
+                            ["createIfNotExists"] = createContent
+                        }
+                    }
+                };
 
+                var createMutationRequest =
+                    new ApiRequest($"/data/mutate/{request.GetDatasetIdOrDefault()}", Method.Post, Creds)
+                        .WithJsonBody(createMutation);
+                
+                await Client.ExecuteWithErrorHandling<TransactionResponse>(createMutationRequest);
+                
                 // Link the translated reference with its base
                 try
                 {
@@ -559,8 +611,18 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         if (existingTranslations.TryGetValue(request.Locale, out var existingTranslatedDocId))
         {
             translatedDocumentId = existingTranslatedDocId;
-            
-            // Remove immutable/system fields before patching
+            var targetPatchId = publish ? translatedDocumentId : DraftContentHelper.GetDraftId(translatedDocumentId);
+
+            if (!publish)
+            {
+                var publishedContentList = await _draftHelper.GetContentWithDraftFallbackAsync(
+                    translatedDocumentId, 
+                    request.GetDatasetIdOrDefault());
+                
+                if (publishedContentList.Count > 0)
+                    await EnsureDraftExistsAsync(request, translatedDocumentId, publishedContentList.First());
+            }
+
             var patchContent = (JObject)mainMutation.Content.DeepClone();
             patchContent.Remove("_id");
             patchContent.Remove("_type");
@@ -579,7 +641,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                     {
                         ["patch"] = new JObject
                         {
-                            ["id"] = translatedDocumentId,
+                            ["id"] = targetPatchId,
                             ["set"] = patchContent
                         }
                     }
@@ -593,28 +655,35 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
         else
         {
-            // Prepare content for creation - remove immutable/system fields
+            translatedDocumentId = GenerateLocalizedDocumentId();
+            var targetCreateId = publish ? translatedDocumentId : DraftContentHelper.GetDraftId(translatedDocumentId);
+
             var createContent = (JObject)mainMutation.Content.DeepClone();
-            createContent.Remove("_id"); // Remove old _id
+            createContent.Remove("_id");
             createContent.Remove("_rev");
             createContent.Remove("_createdAt");
             createContent.Remove("_updatedAt");
-            
-            // Set required fields
+            createContent["_id"] = targetCreateId;
             createContent["_type"] = baseDocument["_type"];
             createContent["language"] = request.Locale;
             
-            try
+            var createMutation = new JObject
             {
-                translatedDocumentId = await translationService.CreateTranslatedDocumentAsync(
-                    request.GetDatasetIdOrDefault(), 
-                    createContent);
-            }
-            catch (Exception ex)
-            {
-                throw new PluginApplicationException($"Failed to create translated document. Error: {ex.Message}", ex);
-            }
+                ["mutations"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["createIfNotExists"] = createContent
+                    }
+                }
+            };
 
+            var createMutationRequest =
+                new ApiRequest($"/data/mutate/{request.GetDatasetIdOrDefault()}", Method.Post, Creds).WithJsonBody(
+                    createMutation);
+            
+            await Client.ExecuteWithErrorHandling<TransactionResponse>(createMutationRequest);
+            
             try
             {
                 await translationService.CreateOrUpdateTranslationMetadataAsync(
@@ -633,11 +702,12 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             }
         }
 
-        var targetContent = await GetContentForOutputAsync(translatedDocumentId, request.GetDatasetIdOrDefault());
+        var finalTargetContentId = publish ? translatedDocumentId : DraftContentHelper.GetDraftId(translatedDocumentId);
+        var targetContent = await GetContentForOutputAsync(finalTargetContentId, request.GetDatasetIdOrDefault());
         var referencedContents = await GetContentsByExactIdsAsync(request.GetDatasetIdOrDefault(), idMapping.Values);
 
         return new UploadContentResult(
-            translatedDocumentId,
+            finalTargetContentId,
             targetContent,
             idMapping,
             referencedContents);
