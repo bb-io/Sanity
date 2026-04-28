@@ -202,7 +202,10 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             new Dictionary<string, JObject>());
     }
 
-    private async Task<UploadContentResult> UpdateContentFieldLevelInReleaseAsync(UpdateContentFromHtmlRequest request, string html, string contentId)
+    private async Task<UploadContentResult> UpdateContentFieldLevelInReleaseAsync(
+        UpdateContentFromHtmlRequest request,
+        string html,
+        string contentId)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
@@ -218,30 +221,50 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         var referencedContents = await GetReleaseAwareContentsByIdAsync(datasetId, referencedContentIds);
 
+        var releaseSeedDocuments = new[] { mainContent }.Concat(referencedContents.Values).ToList();
+
+        if (!publish)
+        {
+            releaseSeedDocuments = releaseSeedDocuments
+                .Select(x =>
+                {
+                    var clone = (JObject)x.DeepClone();
+                    var id = clone["_id"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(id) && !id.StartsWith("drafts.", StringComparison.Ordinal))
+                    {
+                        clone["_id"] = DraftContentHelper.GetDraftId(id);
+                    }
+
+                    return clone;
+                })
+                .ToList();
+        }
+
         await _releaseService.CreateOrReplaceReleaseVersionsAsync(
             datasetId,
             releaseName,
-            new[] { mainContent }.Concat(referencedContents.Values));
+            releaseSeedDocuments);
 
         var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.FieldLevel);
         var mutationResult = converter.ToJsonPatches(html, mainContent, request.Locale, true, referencedContents);
 
         var releasePatches = new List<JObject>();
-        if (mutationResult.Mutations.Any()
+        if (mutationResult.Mutations.Count != 0
             && mutationResult.Mutations.First().Content["fieldLevelPatches"] is JArray patchArray)
         {
             releasePatches = patchArray
                 .OfType<JObject>()
-                .Select(x => 
+                .Select(x =>
                 {
                     var patched = RetargetPatchToRelease(x, releaseName);
-                    if (publish) 
-                        return patched;
-                    
-                    var id = patched["patch"]?["id"]?.ToString();
-                    if (id != null && !id.StartsWith("drafts."))
-                        patched["patch"]["id"] = DraftContentHelper.GetDraftId(id);
-                    
+
+                    if (!publish)
+                    {
+                        var id = patched["patch"]?["id"]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(id) && !id.StartsWith("drafts.", StringComparison.Ordinal))
+                            patched["patch"]!["id"] = DraftContentHelper.GetDraftId(id);
+                    }
+
                     return patched;
                 })
                 .ToList();
@@ -250,10 +273,17 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         if (!releasePatches.Any())
         {
             var releaseContentId = ReleaseContentHelper.BuildVersionId(releaseName, contentId);
+            if (!publish)
+                releaseContentId = DraftContentHelper.GetDraftId(releaseContentId);
+
             var releaseContent = await GetReleaseAwareContentAsync(releaseContentId, datasetId);
             var emptyReferenceMapping = referencedContentIds.ToDictionary(
                 key => key,
-                key => ReleaseContentHelper.BuildVersionId(releaseName, key),
+                key =>
+                {
+                    var releaseRefId = ReleaseContentHelper.BuildVersionId(releaseName, key);
+                    return publish ? releaseRefId : DraftContentHelper.GetDraftId(releaseRefId);
+                },
                 StringComparer.Ordinal);
 
             return new UploadContentResult(
@@ -277,10 +307,17 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var targetContentId = ReleaseContentHelper.BuildVersionId(releaseName, contentId);
+        if (!publish)
+            targetContentId = DraftContentHelper.GetDraftId(targetContentId);
+
         var targetContent = await GetReleaseAwareContentAsync(targetContentId, datasetId);
         var referenceIdMapping = referencedContentIds.ToDictionary(
             key => key,
-            key => ReleaseContentHelper.BuildVersionId(releaseName, key),
+            key =>
+            {
+                var releaseRefId = ReleaseContentHelper.BuildVersionId(releaseName, key);
+                return publish ? releaseRefId : DraftContentHelper.GetDraftId(releaseRefId);
+            },
             StringComparer.Ordinal);
 
         return new UploadContentResult(
@@ -310,21 +347,24 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var existingTranslations = await translationService.GetTranslationsAsync(basePublishedDocumentId, datasetId);
         if (!existingTranslations.ContainsKey(request.Locale))
         {
-            string releaseDocsQuery = 
-                $"*[_type == \"{baseDocument["_type"]}\" && language == \"{request.Locale}\" && _id in path(\"**versions.{releaseName}.*\")]";
-            var releaseDocs = await SearchContentAsJObjectAsync(new()
-                {
-                    DatasetId = datasetId, 
-                    GroqQuery = releaseDocsQuery
-                }
-            );
-    
+            var releaseDocs = await SearchContentAsJObjectAsync(new SearchContentRequest
+            {
+                DatasetId = datasetId,
+                ReturnDrafts = true,
+                GroqQuery =
+                    $"_type == {JsonConvert.SerializeObject(baseDocument["_type"]?.ToString())} " +
+                    $"&& language == {JsonConvert.SerializeObject(request.Locale)} " +
+                    $"&& (_id match {JsonConvert.SerializeObject($"versions.{releaseName}.*")} " +
+                    $" || _id match {JsonConvert.SerializeObject($"drafts.versions.{releaseName}.*")})"
+            });
+
             if (releaseDocs.Count > 0)
             {
-                var existingReleaseDocId = releaseDocs.First()["_id"].ToString();
+                var existingReleaseDocId = releaseDocs.First()["_id"]!.ToString();
                 existingTranslations[request.Locale] = ReleaseContentHelper.GetPublishedId(DraftContentHelper.GetPublishedId(existingReleaseDocId));
             }
         }
+        
         var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.DocumentLevel);
         var mutationResult = converter.ToJsonPatches(html, baseDocument, request.Locale, true, null);
 
