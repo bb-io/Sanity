@@ -621,9 +621,13 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 // Link the translated reference with its base
                 try
                 {
+                    var metadataTranslatedRefId = publish
+                        ? localizedRefId
+                        : DraftContentHelper.GetDraftId(localizedRefId);
+
                     await translationService.CreateOrUpdateTranslationMetadataAsync(
                         baseRefDocId,
-                        localizedRefId,
+                        metadataTranslatedRefId,
                         baseRefLanguage,
                         request.Locale,
                         request.GetDatasetIdOrDefault(),
@@ -726,9 +730,13 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             
             try
             {
+                var metadataTranslatedDocumentId = publish
+                    ? translatedDocumentId
+                    : DraftContentHelper.GetDraftId(translatedDocumentId);
+
                 await translationService.CreateOrUpdateTranslationMetadataAsync(
                     baseDocumentId,
-                    translatedDocumentId,
+                    metadataTranslatedDocumentId,
                     baseLanguage,
                     request.Locale,
                     request.GetDatasetIdOrDefault(),
