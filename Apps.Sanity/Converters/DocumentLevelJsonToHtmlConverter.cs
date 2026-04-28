@@ -144,29 +144,40 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
             referencesSection.SetAttributeValue("id", "blackbird-referenced-documents");
             bodyNode.AppendChild(referencesSection);
 
-            foreach (var (refId, refContent) in context.LocalizableReferences)
+            var processedReferenceIds = new HashSet<string>(StringComparer.Ordinal);
+
+            while (true)
             {
-                var refDocDiv = doc.CreateElement("div");
-                refDocDiv.SetAttributeValue("data-content-id", refId);
-                refDocDiv.SetAttributeValue("data-original-ref-id", refId);
-                refDocDiv.SetAttributeValue("class", "referenced-document");
-                referencesSection.AppendChild(refDocDiv);
+                var pendingReferences = context.LocalizableReferences
+                    .Where(reference => !processedReferenceIds.Contains(reference.Key))
+                    .ToList();
 
-                // Store original JSON of referenced document
-                var refJsonString = refContent.ToString(Newtonsoft.Json.Formatting.None);
-                var refJsonBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(refJsonString));
-                refDocDiv.SetAttributeValue("data-original-json", refJsonBase64);
+                if (pendingReferences.Count == 0)
+                    break;
 
-                foreach (var refProperty in refContent.Properties())
+                foreach (var (refId, refContent) in pendingReferences)
                 {
-                    if (ShouldSkipPropertyByExclusion(refProperty.Name, refProperty.Value, context))
-                        continue;
+                    processedReferenceIds.Add(refId);
 
-                    var refFieldPath = $"{refProperty.Name}";
-                    var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, context, refId);
-                    if (refFieldNode != null)
+                    var refDocDiv = doc.CreateElement("div");
+                    refDocDiv.SetAttributeValue("data-content-id", refId);
+                    refDocDiv.SetAttributeValue("data-original-ref-id", refId);
+                    refDocDiv.SetAttributeValue("class", "referenced-document");
+                    referencesSection.AppendChild(refDocDiv);
+
+                    var refJsonString = refContent.ToString(Newtonsoft.Json.Formatting.None);
+                    var refJsonBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(refJsonString));
+                    refDocDiv.SetAttributeValue("data-original-json", refJsonBase64);
+
+                    foreach (var refProperty in refContent.Properties().ToList())
                     {
-                        refDocDiv.AppendChild(refFieldNode);
+                        if (ShouldSkipPropertyByExclusion(refProperty.Name, refProperty.Value, context))
+                            continue;
+
+                        var refFieldPath = $"{refProperty.Name}";
+                        var refFieldNode = await ConvertTokenToHtml(doc, refProperty.Value, refFieldPath, context, refId);
+                        if (refFieldNode != null)
+                            refDocDiv.AppendChild(refFieldNode);
                     }
                 }
             }
