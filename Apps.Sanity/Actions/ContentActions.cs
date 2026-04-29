@@ -507,13 +507,16 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             throw new PluginApplicationException("Main document mutation not found in the result.");
         }
 
-        // Build ID mapping for referenced documents
+        // Build ID mapping for referenced documents.
+        // For draft uploads, main draft documents must point to draft references,
+        // otherwise Sanity rejects the mutation because the published target does not exist yet.
         var idMapping = new Dictionary<string, string>(StringComparer.Ordinal);
         
         // Process referenced documents first
         foreach (var refMutation in mutationResult.Mutations.Where(m => !m.IsMainDocument))
         {
             string localizedRefId;
+            string localizedRefStorageId;
             
             // Find the base document ID (in case the referenced document is already a translation)
             var baseRefDocId = await translationService.GetBaseDocumentIdAsync(
@@ -530,6 +533,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 // Update existing translated reference document
                 localizedRefId = existingLocalizedRefId;
                 var targetPatchId = publish ? localizedRefId : DraftContentHelper.GetDraftId(localizedRefId);
+                localizedRefStorageId = targetPatchId;
 
                 if (!publish)
                 {
@@ -588,6 +592,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 
                 localizedRefId = GenerateLocalizedDocumentId();
                 var targetCreateId = publish ? localizedRefId : DraftContentHelper.GetDraftId(localizedRefId);
+                localizedRefStorageId = targetCreateId;
 
                 var createContent = (JObject)refMutation.Content.DeepClone();
                 createContent.Remove("_id");
@@ -644,7 +649,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             // Add to ID mapping
             foreach (var mapping in refMutation.ReferenceMapping)
             {
-                idMapping[mapping.Key] = localizedRefId;
+                idMapping[mapping.Key] = localizedRefStorageId;
             }
         }
 
