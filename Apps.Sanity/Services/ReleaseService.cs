@@ -262,13 +262,20 @@ public class ReleaseService
         return content =>
         {
             var releaseDocument = (JObject)content.DeepClone();
-            var publishedId = ReleaseContentHelper.GetPublishedId(releaseDocument["_id"]?.ToString() ?? string.Empty);
+            var originalId = releaseDocument["_id"]?.ToString() ?? string.Empty;
+            var isDraft = originalId.StartsWith("drafts.", StringComparison.Ordinal);
+            var publishedId = ReleaseContentHelper.GetPublishedId(originalId);
 
             releaseDocument.Remove("_rev");
             releaseDocument.Remove("_createdAt");
             releaseDocument.Remove("_updatedAt");
-            releaseDocument["_id"] = ReleaseContentHelper.BuildVersionId(releaseName, publishedId);
+        
+            var newVersionId = ReleaseContentHelper.BuildVersionId(releaseName, publishedId);
 
+            if (isDraft)
+                newVersionId = DraftContentHelper.GetDraftId(newVersionId);
+
+            releaseDocument["_id"] = newVersionId;
             return releaseDocument;
         };
     }

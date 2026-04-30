@@ -138,8 +138,12 @@ public class TranslationMetadataService
     private async Task CreateTranslationMetadataAsync(string baseDocumentId, string translatedDocumentId,
         string baseLanguage, string targetLanguage, string datasetId, TranslationMetadataSchema schema)
     {
-        var metadata = CreateNewTranslationMetadataContent(baseDocumentId, translatedDocumentId, baseLanguage, targetLanguage, schema);
-        metadata.Remove("_id");
+        var metadata = CreateNewTranslationMetadataContent(
+            baseDocumentId,
+            translatedDocumentId,
+            baseLanguage,
+            targetLanguage,
+            schema);
 
         var mutation = new JObject
         {
@@ -147,7 +151,7 @@ public class TranslationMetadataService
             {
                 new JObject
                 {
-                    ["create"] = metadata
+                    ["createIfNotExists"] = metadata
                 }
             }
         };

@@ -1,4 +1,4 @@
-﻿using Apps.Sanity.Actions;
+using Apps.Sanity.Actions;
 using Apps.Sanity.Models.Requests;
 using Apps.Sanity.Models.Responses.Content;
 using Blackbird.Applications.Sdk.Common.Exceptions;
@@ -11,6 +11,8 @@ namespace Tests.Sanity;
 [TestClass]
 public class ContentActionsTests : TestBase
 {
+    private const string CustomerReproHtmlFileName = "productPage-842cc6c9-8c68-4050-a1d1-80ed510dc2fa-en-fr-T-C.html";
+
     [TestMethod]
     public async Task SearchContent_WithoutInputParameters_ShouldNotThrowAnError()
     {
@@ -109,8 +111,8 @@ public class ContentActionsTests : TestBase
         var content =
             await datasetDataHandler.GetContentAsHtmlAsync(new()
             {
-                ContentId = contentId, 
-                SourceLanguage = "EN", 
+                ContentId = contentId,
+                SourceLanguage = "EN",
                 IncludeReferenceEntries = true,
                 IncludeRichTextReferenceEntries = true,
                 ReferenceFieldNames = ["snippet-ref"]
@@ -134,6 +136,26 @@ public class ContentActionsTests : TestBase
             },
             //Publish = false
         });
+    }
+
+    [TestMethod]
+    public async Task UpdateContentFromHtml_CustomerDuplicateRepro_ShouldRunAgainstSandbox()
+    {
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
+        var result = await datasetDataHandler.UpdateContentFromHtmlAsync(new()
+        {
+            DatasetId = "french-translation-existing-content-sync-testing",
+            Locale = "fr",
+            Publish = false,
+            Content = new()
+            {
+                Name = "productPage-842cc6c9-8c68-4050-a1d1-80ed510dc2fa-en-fr-T-C.html"
+            },
+            //TranslationMetadataSchema = "Legacy"
+        });
+
+        Console.WriteLine($"Upload output file: {result.Content.Name}");
+        Assert.IsNotNull(result);
     }
 
     [TestMethod]
@@ -173,7 +195,7 @@ public class ContentActionsTests : TestBase
         await Assert.ThrowsExceptionAsync<PluginMisconfigurationException>(async () =>
             await datasetDataHandler.DeleteContentAsync(new() { ContentId = contentId }));
     }
-    
+
     [TestMethod]
     public async Task AddReferenceToContentAsync_ValidInput_ShouldNotThrowError()
     {
@@ -185,7 +207,7 @@ public class ContentActionsTests : TestBase
             ReferenceContentId = "522472d5-456a-46d5-a44d-f251036a5b17"
         });
     }
-    
+
     [TestMethod]
     public async Task RemoveReferenceFromContentAsync_ValidInput_ShouldNotThrowError()
     {
