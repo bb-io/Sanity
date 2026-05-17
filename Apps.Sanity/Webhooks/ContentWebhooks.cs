@@ -14,7 +14,7 @@ namespace Apps.Sanity.Webhooks;
 [WebhookList]
 public class ContentWebhooks(InvocationContext invocationContext) : AppInvocable(invocationContext)
 {
-    [Webhook("On content updated", typeof(ContentUpdatedHandler), 
+    [Webhook("On content removed", typeof(ContentUpdatedHandler), 
         Description = "This event is triggered when a content is updated.")]
     [BlueprintEventDefinition(BlueprintEvent.ContentCreatedOrUpdated)]
     public Task<WebhookResponse<ContentResponse>> OnContentUpdated(WebhookRequest request,

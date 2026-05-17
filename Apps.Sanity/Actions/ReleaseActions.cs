@@ -15,7 +15,7 @@ public class ReleaseActions(InvocationContext invocationContext) : AppInvocable(
     private readonly ReleaseService _releaseService = new(new Api.ApiClient(invocationContext.AuthenticationCredentialsProviders),
         invocationContext.AuthenticationCredentialsProviders);
 
-    [Action("Search releases", Description = "Search for releases within a specific dataset.")]
+    [Action("Search releases", Description = "List all releases")]
     public async Task<SearchReleasesResponse> SearchReleasesAsync([ActionParameter] SearchReleasesRequest request)
     {
         var releases = await _releaseService.SearchReleasesAsync(request);
@@ -39,12 +39,6 @@ public class ReleaseActions(InvocationContext invocationContext) : AppInvocable(
             request.ReleaseType);
 
         return await _releaseService.GetReleaseAsync(request.GetDatasetIdOrDefault(), request.ReleaseName);
-    }
-
-    [Action("Delete release", Description = "Delete a published or archived release.")]
-    public Task DeleteReleaseAsync([ActionParameter] ReleaseIdentifier request)
-    {
-        return _releaseService.DeleteReleaseAsync(request.GetDatasetIdOrDefault(), request.ReleaseName);
     }
 
     [Action("Search release documents", Description = "Retrieve documents that belong to a release. Published releases are resolved from final document states.")]
