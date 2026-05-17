@@ -28,7 +28,7 @@ Before setting up the integration, ensure that you have access to a Sanity proje
 6. Click **Authorize connection**.
 7. Confirm that the connection is established and that the status shows **Connected**.
 
-![Connection](image/README/connection.png)
+![Connection](image/README/connection.png) 
 
 ## Actions
 
