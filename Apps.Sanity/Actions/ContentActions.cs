@@ -1202,7 +1202,17 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     private async Task<string> BuildContentHtmlAsync(GetContentAsHtmlRequest request, JObject content,
         Dictionary<string, JObject> referencedEntries, List<FieldSizeRestriction>? fieldRestrictions)
     {
-        var strategy = Enum.Parse<LocalizationStrategy>(request.LocalizationStrategy);
+        LocalizationStrategy strategy;
+        try
+        {
+            strategy = Enum.Parse<LocalizationStrategy>(request.LocalizationStrategy);
+        }
+        catch (Exception)
+        {
+            var supportedStrategies = string.Join(", ", Enum.GetNames<LocalizationStrategy>());
+            throw new PluginMisconfigurationException($"Could not parse localization strategy '{request.LocalizationStrategy}', supported values are: {supportedStrategies}.");
+        }
+        
         var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
         var sourceLanguage = content["language"]?.ToString() ?? request.SourceLanguage;
         var exportMetadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, sourceLanguage);

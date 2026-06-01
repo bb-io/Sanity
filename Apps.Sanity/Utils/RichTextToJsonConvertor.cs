@@ -6,21 +6,22 @@ namespace Apps.Sanity.Utils;
 
 public static class RichTextToJsonConvertor
 {
-    public static JObject? CreatePatchObject(HtmlNode richTextNode, JObject currentJObject, string contentId, 
+    public static JObject? CreatePatchObject(HtmlNode richTextNode, JObject currentJObject, string contentId,
         string sourceLanguage, string targetLanguage)
     {
         var jsonPath = richTextNode.GetAttributeValue("data-json-path", null!);
         if (string.IsNullOrEmpty(jsonPath))
             return null;
-        
+
         var convertedJson = ConvertFromHtml(richTextNode);
         var basePath = ExtractBasePath(jsonPath);
         var targetLanguageExists = DoesTargetLanguageExist(currentJObject, basePath, targetLanguage);
-        
+        var usesLanguageField = InferUsesLanguageField(currentJObject, basePath);
         var contentType = ExtractContentType(currentJObject, basePath, sourceLanguage);
-        return targetLanguageExists 
-            ? CreateReplacePatch(contentId, basePath, targetLanguage, convertedJson, contentType) 
-            : CreateInsertAfterPatch(contentId, basePath, targetLanguage, convertedJson, contentType);
+
+        return targetLanguageExists
+            ? CreateReplacePatch(contentId, basePath, targetLanguage, convertedJson, contentType, usesLanguageField)
+            : CreateInsertAfterPatch(contentId, basePath, targetLanguage, convertedJson, contentType, usesLanguageField);
     }
     
     private static JArray ConvertFromHtml(HtmlNode richTextNode)
@@ -66,14 +67,18 @@ public static class RichTextToJsonConvertor
         {
             foreach (var item in array)
             {
-                if (item is JObject obj && obj["_key"]?.ToString()?.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) == true)
+                if (item is JObject obj)
                 {
-                    var objType = obj["_type"]?.ToString();
-                    return objType ?? "internationalizedArrayBlockContent";
+                    var itemLang = obj["language"]?.ToString() ?? obj["_key"]?.ToString();
+                    if (itemLang?.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        var objType = obj["_type"]?.ToString();
+                        return objType ?? "internationalizedArrayBlockContent";
+                    }
                 }
             }
         }
-        
+
         return "internationalizedArrayBlockContent";
     }
     
@@ -156,44 +161,83 @@ public static class RichTextToJsonConvertor
         {
             foreach (var item in array)
             {
-                if (item is JObject obj && obj["_key"]?.ToString() == targetLanguage)
+                if (item is JObject obj &&
+                    (obj["language"]?.ToString() ?? obj["_key"]?.ToString()) == targetLanguage)
                 {
                     return true;
                 }
             }
         }
+
         return false;
     }
-    
-    private static JObject CreateReplacePatch(string contentId, string basePath, string targetLanguage, JArray content, string contentType)
+
+    private static bool InferUsesLanguageField(JObject jObject, string basePath)
     {
-        var patch = new JObject
+        var token = ResolveTokenAtPath(jObject, basePath);
+        if (token is JArray arr && arr.Count > 0 && arr[0] is JObject firstItem)
+        {
+            return firstItem["language"] != null;
+        }
+
+        return false;
+    }
+
+    private static JObject CreateReplacePatch(string contentId, string basePath, string targetLanguage, JArray content,
+        string contentType, bool usesLanguageField)
+    {
+        var item = usesLanguageField
+            ? new JObject
+            {
+                ["_key"] = Guid.NewGuid().ToString("N")[..32],
+                ["_type"] = contentType,
+                ["language"] = targetLanguage,
+                ["value"] = content
+            }
+            : new JObject
+            {
+                ["_key"] = targetLanguage,
+                ["_type"] = contentType,
+                ["value"] = content
+            };
+
+        var selector = usesLanguageField
+            ? $"{basePath}[language==\"{targetLanguage}\"]"
+            : $"{basePath}[_key==\"{targetLanguage}\"]";
+
+        return new JObject
         {
             ["patch"] = new JObject
             {
                 ["id"] = contentId,
                 ["insert"] = new JObject
                 {
-                    ["replace"] = $"{basePath}[_key==\"{targetLanguage}\"]",
-                    ["items"] = new JArray
-                    {
-                        new JObject
-                        {
-                            ["_key"] = targetLanguage,
-                            ["_type"] = contentType,
-                            ["value"] = content
-                        }
-                    }
+                    ["replace"] = selector,
+                    ["items"] = new JArray { item }
                 }
             }
         };
-        
-        return patch;
     }
-    
-    private static JObject CreateInsertAfterPatch(string contentId, string basePath, string targetLanguage, JArray content, string contentType)
+
+    private static JObject CreateInsertAfterPatch(string contentId, string basePath, string targetLanguage, JArray content,
+        string contentType, bool usesLanguageField)
     {
-        var patch = new JObject
+        var item = usesLanguageField
+            ? new JObject
+            {
+                ["_key"] = Guid.NewGuid().ToString("N")[..32],
+                ["_type"] = contentType,
+                ["language"] = targetLanguage,
+                ["value"] = content
+            }
+            : new JObject
+            {
+                ["_key"] = targetLanguage,
+                ["_type"] = contentType,
+                ["value"] = content
+            };
+
+        return new JObject
         {
             ["patch"] = new JObject
             {
@@ -201,20 +245,10 @@ public static class RichTextToJsonConvertor
                 ["insert"] = new JObject
                 {
                     ["after"] = $"{basePath}[-1]",
-                    ["items"] = new JArray
-                    {
-                        new JObject
-                        {
-                            ["_key"] = targetLanguage,
-                            ["_type"] = contentType,
-                            ["value"] = content
-                        }
-                    }
+                    ["items"] = new JArray { item }
                 }
             }
         };
-        
-        return patch;
     }
     
     private static JObject? ConvertHtmlElementToBlock(HtmlNode node)

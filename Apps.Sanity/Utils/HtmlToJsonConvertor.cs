@@ -115,6 +115,7 @@ public static class HtmlToJsonConvertor
             {
                 var arrayName = GetArrayName(parsedPathSegments);
                 var itemType = InferInternationalizedType(contentObj, arrayName);
+                var usesLanguageField = InferUsesLanguageField(contentObj, arrayName);
 
                 if (patchContent["insert"] == null)
                 {
@@ -129,17 +130,25 @@ public static class HtmlToJsonConvertor
                 var itemsArray = (JArray)insertContent["items"]!;
                 var existingItem = itemsArray
                     .OfType<JObject>()
-                    .FirstOrDefault(i => i["_key"]?.ToString() == targetLanguage);
+                    .FirstOrDefault(i => (i["language"]?.ToString() ?? i["_key"]?.ToString()) == targetLanguage);
 
                 if (existingItem == null)
                 {
-                    existingItem = new JObject
-                    {
-                        ["_key"] = targetLanguage,
-                        ["_type"] = itemType,
-                        ["value"] = new JObject()
-                    };
-                    
+                    existingItem = usesLanguageField
+                        ? new JObject
+                        {
+                            ["_key"] = Guid.NewGuid().ToString("N")[..32],
+                            ["_type"] = itemType,
+                            ["language"] = targetLanguage,
+                            ["value"] = new JObject()
+                        }
+                        : new JObject
+                        {
+                            ["_key"] = targetLanguage,
+                            ["_type"] = itemType,
+                            ["value"] = new JObject()
+                        };
+
                     itemsArray.Add(existingItem);
                 }
 
@@ -241,7 +250,8 @@ public static class HtmlToJsonConvertor
                         for (int k = 0; k < arr.Count; k++)
                         {
                             var itemObj = arr[k] as JObject;
-                            if (itemObj?["_key"]?.ToString().Equals(lang, StringComparison.OrdinalIgnoreCase) == true)
+                            var itemLang = itemObj?["language"]?.ToString() ?? itemObj?["_key"]?.ToString();
+                            if (itemLang?.Equals(lang, StringComparison.OrdinalIgnoreCase) == true)
                             {
                                 idx = k;
                                 break;
@@ -332,6 +342,17 @@ public static class HtmlToJsonConvertor
         }
 
         return "internationalizedArrayStringValue";
+    }
+
+    private static bool InferUsesLanguageField(JObject current, string arrayPath)
+    {
+        var token = ResolveTokenAtPath(current, arrayPath);
+        if (token is JArray arr && arr.Count > 0 && arr[0] is JObject firstItem)
+        {
+            return firstItem["language"] != null;
+        }
+
+        return false;
     }
 
     private static JToken? ResolveTokenAtPath(JObject root, string path)

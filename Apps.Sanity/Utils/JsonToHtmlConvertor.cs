@@ -206,7 +206,8 @@ public static class JsonToHtmlConverter
     {
         if (IsInternationalizedValue(obj))
         {
-            var lang = obj["_key"]?.ToString();
+            // Support both old format (_key == language code) and new format (language field + random _key)
+            var lang = obj["language"]?.ToString() ?? obj["_key"]?.ToString();
             if (lang == null || lang != sourceLanguage)
             {
                 return null;
@@ -295,7 +296,7 @@ public static class JsonToHtmlConverter
         {
             var itemForSource = arr
                 .OfType<JObject>()
-                .FirstOrDefault(o => o["_key"]?.ToString() == sourceLanguage);
+                .FirstOrDefault(o => (o["language"]?.ToString() ?? o["_key"]?.ToString()) == sourceLanguage);
 
             if (itemForSource != null)
             {
