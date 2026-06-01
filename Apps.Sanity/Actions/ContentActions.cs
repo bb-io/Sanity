@@ -34,9 +34,9 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     private readonly DraftContentHelper _draftHelper = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
     private readonly ReleaseService _releaseService = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
 
-    [Action("List content",
+    [Action("Search content",
         Description =
-            "Retrieve for content within a specific dataset. If no dataset is specified, the production dataset is used by default.")]
+            "Search for content within a specific dataset. If no dataset is specified, the production dataset is used by default.")]
     public async Task<SearchContentResponse> SearchContentAsync([ActionParameter] SearchContentRequest request)
     {
         var result = await SearchContentInternalAsync<ContentResponse>(request);
@@ -61,7 +61,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         return result.First().ToObject<ContentResponse>()!;
     }
 
-    [Action("Get content as HTML", Description = "Get localizable content fields as HTML file")]
+    [Action("Download content", Description = "Get localizable content fields as HTML file")]
     [BlueprintActionDefinition(BlueprintAction.DownloadContent)]
     public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
     {
@@ -80,7 +80,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         return await UploadHtmlOutputAsync($"{getContentAsHtmlRequest.ContentId}.html", html);
     }
 
-    [Action("Update content from HTML", Description = "Update localizable content fields from HTML file")]
+    [Action("Upload content", Description = "Update localizable content fields from HTML file")]
     [BlueprintActionDefinition(BlueprintAction.UploadContent)]
     public async Task<UploadContentResponse> UpdateContentFromHtmlAsync([ActionParameter] UpdateContentFromHtmlRequest request)
     {
