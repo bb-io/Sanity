@@ -47,19 +47,23 @@ public static class HtmlToJsonConvertor
         contentRoot ??= doc.DocumentNode.SelectSingleNode($"//div[@data-content-id='{contentId}']");
         if (contentRoot == null) return;
         
+        var richTextTargetId = publish
+            ? DraftContentHelper.GetPublishedId(contentId)
+            : DraftContentHelper.GetDraftId(DraftContentHelper.GetPublishedId(contentId));
+
         var richTextNodes = contentRoot.SelectNodes(".//*[@data-rich-text='true']");
         if (richTextNodes != null)
         {
             foreach (var richTextNode in richTextNodes)
             {
                 var richTextPatch = RichTextToJsonConvertor.CreatePatchObject(
-                    richTextNode, 
-                    contentObj, 
-                    contentId, 
-                    sourceLanguage, 
+                    richTextNode,
+                    contentObj,
+                    richTextTargetId,
+                    sourceLanguage,
                     targetLanguage
                 );
-                
+
                 if (richTextPatch != null)
                 {
                     patches.Add(richTextPatch);
