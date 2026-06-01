@@ -57,11 +57,10 @@ public static class RichTextToHtmlConvertor
                     return ProcessCustomBlock(block, doc, blockPath, blockJsonPath, contentArray, assetService,
                         datasetId, excludedFields, strictExcludedFields);
                 }
-                
-                var unknownNode = doc.CreateElement("div");
-                unknownNode.SetAttributeValue("data-block-path", blockPath);
-                unknownNode.SetAttributeValue("data-type", blockType ?? "unknown");
-                return unknownNode;
+
+                // Any non-text, non-image, non-content block (e.g. snippetRef, custom ref types):
+                // route through ProcessReferenceBlock so data-original-block is stored for round-trip
+                return ProcessReferenceBlock(block, doc, blockPath);
         }
     }
 
@@ -287,11 +286,15 @@ public static class RichTextToHtmlConvertor
         refNode.SetAttributeValue("translate", "no");
         refNode.SetAttributeValue("data-block-path", blockPath);
         refNode.SetAttributeValue("data-block-key", block["_key"]?.ToString()!);
-        
+
         var blockType = block["_type"]?.ToString() ?? "reference";
         refNode.SetAttributeValue("data-type", blockType);
 
-        var refId = block["_ref"]?.ToString();
+        // Store full original block so the round-trip is lossless (preserves ref/nested structures)
+        refNode.SetAttributeValue("data-original-block", block.ToString(Newtonsoft.Json.Formatting.None));
+
+        // Support both direct _ref and nested ref._ref (used by snippetRef type)
+        var refId = block["_ref"]?.ToString() ?? block["ref"]?["_ref"]?.ToString();
         if (!string.IsNullOrEmpty(refId))
         {
             refNode.SetAttributeValue("data-ref-id", refId);

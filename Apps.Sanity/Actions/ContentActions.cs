@@ -1202,7 +1202,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     private async Task<string> BuildContentHtmlAsync(GetContentAsHtmlRequest request, JObject content,
         Dictionary<string, JObject> referencedEntries, List<FieldSizeRestriction>? fieldRestrictions)
     {
-        var strategy = Enum.Parse<LocalizationStrategy>(request.LocalizationStrategy);
+        LocalizationStrategy strategy = request.LocalizationStrategy.ParseLocalizationStrategy();
+        
         var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
         var sourceLanguage = content["language"]?.ToString() ?? request.SourceLanguage;
         var exportMetadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, sourceLanguage);
@@ -1559,17 +1560,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         {
             if (objectsById.TryGetValue(id, out var entry))
             {
-                if (entry["language"] != null)
-                {
-                    referencedEntries[id] = entry;
-                    await CollectReferencesRecursivelyAsync(
-                        entry,
-                        datasetId,
-                        includeReferenceEntries,
-                        includeRichTextReferenceEntries,
-                        referencedEntries,
-                        referenceFieldNames);
-                }
+                referencedEntries[id] = entry;
+                await CollectReferencesRecursivelyAsync(
+                    entry,
+                    datasetId,
+                    includeReferenceEntries,
+                    includeRichTextReferenceEntries,
+                    referencedEntries,
+                    referenceFieldNames);
             }
         }
     }
@@ -1585,14 +1583,15 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         if (token is JObject obj)
         {
             var isReferenceField = parentPropertyName != null && referenceFieldNames.Contains(obj["_type"]?.ToString());
-            if ((obj["_type"]?.ToString() == "reference" || isReferenceField) && obj["_ref"] != null)
+            // Support both direct _ref (standard) and nested ref._ref (e.g. snippetRef stores reference under ref._ref)
+            var refId = obj["_ref"]?.ToString() ?? (isReferenceField ? obj["ref"]?["_ref"]?.ToString() : null);
+            if ((obj["_type"]?.ToString() == "reference" || isReferenceField) && refId != null)
             {
-                if(obj["_ref"]?.ToString().Contains("image") == true)
+                if (refId.Contains("image"))
                 {
                     return;
                 }
-                
-                var refId = obj["_ref"]!.ToString();
+
                 bool isRichTextReference = parentPropertyName == "value";
 
                 if ((isRichTextReference && includeRichTextReferenceEntries) ||
