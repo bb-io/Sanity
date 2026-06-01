@@ -268,13 +268,38 @@ public static class RichTextToJsonConvertor
         else if (node.Name == "div")
         {
             var dataType = node.GetAttributeValue("data-type", "");
+            var originalBlockAttr = node.GetAttributeValue("data-original-block", "");
+
+            if (!string.IsNullOrEmpty(originalBlockAttr))
+            {
+                // Has preserved original JSON: custom blocks (with child elements) rebuild their
+                // content array; reference/simple blocks (no child elements) are restored as-is.
+                var hasChildElements = node.ChildNodes.Any(c => c.NodeType == HtmlNodeType.Element);
+                if (hasChildElements)
+                {
+                    return ProcessCustomBlockToBlock(node);
+                }
+
+                try
+                {
+                    return JObject.Parse(System.Net.WebUtility.HtmlDecode(originalBlockAttr));
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            // Backward compat: HTML without data-original-block (old exports)
             if (dataType == "reference" || dataType == "snippet-ref")
             {
                 return ProcessReferenceToBlock(node);
             }
-            else if (!string.IsNullOrEmpty(dataType) && node.GetAttributeValue("data-original-block", "") != "")
+
+            if (!string.IsNullOrEmpty(dataType))
             {
-                return ProcessCustomBlockToBlock(node);
+                // Unknown non-text block type with no original JSON — skip rather than corrupt
+                return null;
             }
         }
 
