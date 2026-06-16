@@ -91,6 +91,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var localizationStrategy = HtmlHelper.ExtractLocalizationStrategy(html);
         var translationMetadataSchema = ResolveTranslationMetadataSchema(request, localizationStrategy);
         request.ReleaseName ??= ReleaseContentHelper.GetReleaseName(contentId);
+        
         var result = await ExecuteUploadAsync(request, html, contentId, localizationStrategy, translationMetadataSchema);
 
         return await CreateUploadOutputAsync(request, html, contentId, localizationStrategy, transformation, result);
@@ -1279,8 +1280,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
         if (localizationStrategy != LocalizationStrategy.DocumentLevel)
         {
-            throw new PluginMisconfigurationException(
-                "Translation metadata schema can only be specified for document level localization. Remove the value or upload content exported with document level localization.");
+            return TranslationMetadataSchema.Default;
         }
 
         if (!Enum.TryParse<TranslationMetadataSchema>(request.TranslationMetadataSchema, ignoreCase: true, out var parsed))
