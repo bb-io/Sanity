@@ -198,12 +198,13 @@ public class DocumentLevelJsonToHtmlConverter : IJsonToHtmlConverter
         return orderedProperties;
     }
 
-    private static async Task<HtmlNode?> ConvertTokenToHtml(HtmlDocument doc, 
-        JToken token, 
+    private static async Task<HtmlNode?> ConvertTokenToHtml(HtmlDocument doc,
+        JToken token,
         string currentPath,
         ConversionContext context,
         string entityId)
     {
+        await Task.Yield();
         if (token is JObject obj)
         {
             if (obj["_type"]?.ToString() == "reference" && obj["_ref"] != null)

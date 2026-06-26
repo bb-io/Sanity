@@ -34,4 +34,10 @@ public class GetContentAsHtmlRequest : ContentIdentifier, IDownloadContentInput
     
     [Display("Excluded fields", Description = "Additional field names to exclude from translation (beyond the default system fields: _createdAt, _id, _rev, _type, _updatedAt, language). Only applicable for document level localization.")]
     public IEnumerable<string>? ExcludedFields { get; set; }
+
+    [Display("Max reference depth", Description = "Maximum depth of nested references to fetch. Defaults to 5. Reduce this value if the action is timing out due to a large number of nested references (try 1 or 2). Set to 0 to skip reference fetching entirely.")]
+    public int? MaxReferenceDepth { get; set; }
+
+    [Display("Disable asset loading", Description = "When enabled, images are not fetched from the Sanity asset API. Significantly reduces execution time for documents with many images. Defaults to false.")]
+    public bool? DisableAssetLoading { get; set; }
 }
