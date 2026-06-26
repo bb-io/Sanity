@@ -7,17 +7,18 @@ using Blackbird.Applications.Sdk.Common.Invocation;
 
 namespace Apps.Sanity.Services;
 
-public class AssetService(InvocationContext invocationContext)
+public class AssetService(InvocationContext invocationContext, bool disableAssetLoading = false)
 {
     private readonly ApiClient _apiClient = new(invocationContext.AuthenticationCredentialsProviders);
     private readonly DraftContentHelper _draftHelper = new(new ApiClient(invocationContext.AuthenticationCredentialsProviders), invocationContext.AuthenticationCredentialsProviders);
-    
+
     public async Task<string> GetAssetUrlAsync(string datasetId, string assetId)
     {
+        if (disableAssetLoading)
+            return string.Empty;
+
         if (string.IsNullOrWhiteSpace(assetId))
-        {
             throw new ArgumentException("Asset ID cannot be null or empty.", nameof(assetId));
-        }
 
         var asset = await GetContentAsync(datasetId, assetId);
         return asset.Url;

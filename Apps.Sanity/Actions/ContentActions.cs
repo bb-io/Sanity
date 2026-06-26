@@ -66,18 +66,30 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
     {
         if (string.IsNullOrEmpty(getContentAsHtmlRequest.LocalizationStrategy))
-        {
             throw new PluginMisconfigurationException("Localization strategy must be specified.");
+
+        var workTask = ExecuteGetContentAsHtmlAsync(getContentAsHtmlRequest);
+        if (await Task.WhenAny(workTask, Task.Delay(TimeSpan.FromMinutes(15))) != workTask)
+        {
+            throw new PluginMisconfigurationException(
+                "The 'Download content' action timed out after 15 minutes. Your document appears to be very large " +
+                "or contains an excessive number of referenced documents or images. " +
+                "Try reducing the 'Max reference depth' input (default is 5), " +
+                "or enable 'Disable asset loading' to skip image fetching.");
         }
 
-        var content = await GetContentOrThrowAsync(
-            getContentAsHtmlRequest.ContentId,
-            getContentAsHtmlRequest.GetDatasetIdOrDefault());
-        var referencedEntries = await GetReferencedEntriesAsync(getContentAsHtmlRequest, content);
-        var fieldRestrictions = GetFieldRestrictions(getContentAsHtmlRequest.FieldNames, getContentAsHtmlRequest.FieldMaxLength);
-        var html = await BuildContentHtmlAsync(getContentAsHtmlRequest, content, referencedEntries, fieldRestrictions);
+        return await workTask;
+    }
 
-        return await UploadHtmlOutputAsync($"{getContentAsHtmlRequest.ContentId}.html", html);
+    private async Task<GetContentAsHtmlResponse> ExecuteGetContentAsHtmlAsync(GetContentAsHtmlRequest request)
+    {
+        var content = await GetContentOrThrowAsync(
+            request.ContentId,
+            request.GetDatasetIdOrDefault());
+        var referencedEntries = await GetReferencedEntriesAsync(request, content);
+        var fieldRestrictions = GetFieldRestrictions(request.FieldNames, request.FieldMaxLength);
+        var html = await BuildContentHtmlAsync(request, content, referencedEntries, fieldRestrictions);
+        return await UploadHtmlOutputAsync($"{request.ContentId}.html", html);
     }
 
     [Action("Upload content", Description = "Update localizable content fields from HTML file")]
@@ -1155,18 +1167,19 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     {
         var referencedEntries = new Dictionary<string, JObject>();
         if (request.IncludeReferenceEntries != true && request.IncludeRichTextReferenceEntries != true)
-        {
             return referencedEntries;
-        }
 
         var referenceFieldNames = request.ReferenceFieldNames?.ToList() ?? new List<string>();
+        var maxDepth = request.MaxReferenceDepth ?? 5;
         await CollectReferencesRecursivelyAsync(
             content,
             request.DatasetId,
             request.IncludeReferenceEntries == true,
             request.IncludeRichTextReferenceEntries == true,
             referencedEntries,
-            referenceFieldNames);
+            referenceFieldNames,
+            currentDepth: 0,
+            maxDepth: maxDepth);
 
         return referencedEntries;
     }
@@ -1213,7 +1226,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             content,
             request.ContentId,
             sourceLanguage,
-            new AssetService(InvocationContext),
+            new AssetService(InvocationContext, request.DisableAssetLoading == true),
             request.ToString(),
             referencedEntries,
             request.OrderOfFields,
@@ -1536,38 +1549,55 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         bool includeReferenceEntries,
         bool includeRichTextReferenceEntries,
         Dictionary<string, JObject> referencedEntries,
-        IEnumerable<string> referenceFieldNames)
+        IEnumerable<string> referenceFieldNames,
+        int currentDepth = 0,
+        int maxDepth = 5)
     {
-        var referenceIds = new List<string>();
-        CollectReferenceIds(content, includeReferenceEntries, includeRichTextReferenceEntries, referenceIds, referenceFieldNames: referenceFieldNames);
-        referenceIds = referenceIds.Where(id => !referencedEntries.ContainsKey(id)).ToList();
-
-        if (!referenceIds.Any())
+        if (currentDepth >= maxDepth)
             return;
 
-        var idConditions = string.Join(" || ", referenceIds.Select(id => $"_id == \"{id}\""));
-        var referencedObjects = await SearchContentAsJObjectAsync(new()
-        {
-            DatasetId = datasetId,
-            GroqQuery = idConditions
-        });
+        var pendingDocs = new List<JObject> { content };
 
-        var objectsById = referencedObjects
-            .Where(entry => entry["_id"] != null)
-            .ToDictionary(entry => entry["_id"]!.ToString());
-
-        foreach (var id in referenceIds)
+        for (var depth = currentDepth; depth < maxDepth; depth++)
         {
-            if (objectsById.TryGetValue(id, out var entry))
+            var newRefIds = new List<string>();
+            foreach (var doc in pendingDocs)
             {
-                referencedEntries[id] = entry;
-                await CollectReferencesRecursivelyAsync(
-                    entry,
-                    datasetId,
-                    includeReferenceEntries,
-                    includeRichTextReferenceEntries,
-                    referencedEntries,
-                    referenceFieldNames);
+                CollectReferenceIds(doc, includeReferenceEntries, includeRichTextReferenceEntries,
+                    newRefIds, referenceFieldNames: referenceFieldNames);
+            }
+
+            newRefIds = newRefIds
+                .Where(id => !referencedEntries.ContainsKey(id))
+                .Distinct()
+                .ToList();
+
+            if (newRefIds.Count == 0)
+                break;
+
+            const int batchSize = 50;
+            var objectsById = new Dictionary<string, JObject>();
+            for (var batchStart = 0; batchStart < newRefIds.Count; batchStart += batchSize)
+            {
+                var batch = newRefIds.Skip(batchStart).Take(batchSize).ToList();
+                var idConditions = string.Join(" || ", batch.Select(id => $"_id == \"{id}\""));
+                var batchObjects = await SearchContentAsJObjectAsync(new()
+                {
+                    DatasetId = datasetId,
+                    GroqQuery = idConditions
+                });
+                foreach (var entry in batchObjects.Where(e => e["_id"] != null))
+                    objectsById[entry["_id"]!.ToString()] = entry;
+            }
+
+            pendingDocs = new List<JObject>();
+            foreach (var id in newRefIds)
+            {
+                if (objectsById.TryGetValue(id, out var entry))
+                {
+                    referencedEntries[id] = entry;
+                    pendingDocs.Add(entry);
+                }
             }
         }
     }
