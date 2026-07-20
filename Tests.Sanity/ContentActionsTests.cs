@@ -123,6 +123,33 @@ public class ContentActionsTests : TestBase
     }
 
     [TestMethod]
+    public async Task DownloadContent_ThenUploadContent_ESLocale_ShouldNotThrowError()
+    {
+        const string contentId = "b3844f48-000d-4033-9053-266f205cbea8";
+        var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
+
+        var downloadResult = await datasetDataHandler.GetContentAsHtmlAsync(new()
+        {
+            ContentId = contentId,
+            LocalizationStrategy = "FieldLevel",
+            SourceLanguage = "EN"
+        });
+
+        downloadResult.Content.Should().NotBeNull();
+
+        var uploadResult = await datasetDataHandler.UpdateContentFromHtmlAsync(new()
+        {
+            ContentId = contentId,
+            Locale = "ES",
+            Content = downloadResult.Content,
+            Publish = false
+        });
+
+        uploadResult.Should().NotBeNull();
+        Console.WriteLine($"Upload output file: {uploadResult.Content.Name}");
+    }
+
+    [TestMethod]
     public async Task UpdateContentFromHtml_ExistingContent_ShouldNotThrowError()
     {
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);

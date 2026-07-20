@@ -115,10 +115,15 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         doc.LoadHtml(html);
 
         var publish = request.Publish ?? false;
-        var isDraftId = contentId.StartsWith("drafts.");
 
+        // Shape the patches against the exact document version the patches will target.
+        // When not publishing, the patch id resolves to "drafts.<id>", so we must inspect
+        // the draft (creating it from the published document when needed). Using the
+        // published document here caused the insert/replace decision to be made against a
+        // version that could differ from the draft, appending a duplicate _key (e.g. "ES")
+        // that Sanity auto-renames to "<lang>_deduped_N" and which then blocks publishing.
         JObject mainContent;
-        if (!publish && isDraftId)
+        if (!publish)
         {
             mainContent = await _draftHelper.EnsureDraftExistsForUpdateAsync(
                 contentId,
@@ -138,30 +143,42 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
             mainContent = jObjects.First();
         }
-        var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc);
-        var referencedContents = new Dictionary<string, JObject>();
 
-        if (referencedContentIds.Any())
+        var referencedContentIds = HtmlHelper.ExtractReferencedContentIds(doc)
+            .Distinct()
+            .ToList();
+        var referencedContents = new Dictionary<string, JObject>(StringComparer.Ordinal);
+
+        foreach (var referencedContentId in referencedContentIds)
         {
-            var idConditions = string.Join(" || ", referencedContentIds.Select(id => $"_id == \"{id}\""));
-            var referencedObjects = await SearchContentAsJObjectAsync(new()
+            // Ensure referenced drafts exist before mutating and shape their patches against
+            // the same version the patches target, for the same reason as the main document.
+            JObject referencedContent;
+            if (!publish)
             {
-                DatasetId = request.DatasetId,
-                GroqQuery = idConditions
-            });
-
-            foreach (var entry in referencedObjects)
-            {
-                if (entry["_id"] != null)
-                {
-                    referencedContents[entry["_id"]!.ToString()] = entry;
-                }
+                referencedContent = await _draftHelper.EnsureDraftExistsForUpdateAsync(
+                    referencedContentId,
+                    request);
             }
+            else
+            {
+                var referencedObjects = await _draftHelper.GetContentWithDraftFallbackAsync(
+                    referencedContentId,
+                    request.GetDatasetIdOrDefault());
+                if (referencedObjects.Count == 0)
+                {
+                    continue;
+                }
+
+                referencedContent = referencedObjects.First();
+            }
+
+            referencedContents[DraftContentHelper.GetPublishedId(referencedContentId)] = referencedContent;
         }
 
         var converter = ConverterFactory.CreateHtmlToJsonConverter(LocalizationStrategy.FieldLevel);
         var mutationResult = converter.ToJsonPatches(html, mainContent, request.Locale, publish, referencedContents);
-        
+
         // Extract field-level patches from the result
         List<JObject> allPatches = new List<JObject>();
         if (mutationResult.Mutations.Any())
@@ -172,29 +189,21 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
                 allPatches = patchArray.OfType<JObject>().ToList();
             }
         }
-        
-        var apiRequest = new ApiRequest($"/data/mutate/{request.GetDatasetIdOrDefault()}", Method.Post, Creds)
-            .WithJsonBody(new
-            {
-                mutations = allPatches
-            });
-        
-        if(publish == false)
-        {
-            var publishedId = DraftContentHelper.GetPublishedId(contentId);
-            await EnsureDraftExistsAsync(request, publishedId, publishedContent: mainContent);
-            foreach (var referencedContent in referencedContents)
-            {
-                var refPublishedId = DraftContentHelper.GetPublishedId(referencedContent.Key);
-                await EnsureDraftExistsAsync(request, refPublishedId, publishedContent: referencedContent.Value);
-            }
-        }
 
-        var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
-        if (string.IsNullOrEmpty(transaction.TransactionId))
+        if (allPatches.Count > 0)
         {
-            throw new PluginApplicationException(
-                "An unexpected error occurred while updating the content. Please contact support for further assistance.");
+            var apiRequest = new ApiRequest($"/data/mutate/{request.GetDatasetIdOrDefault()}", Method.Post, Creds)
+                .WithJsonBody(new
+                {
+                    mutations = allPatches
+                });
+
+            var transaction = await Client.ExecuteWithErrorHandling<TransactionResponse>(apiRequest);
+            if (string.IsNullOrEmpty(transaction.TransactionId))
+            {
+                throw new PluginApplicationException(
+                    "An unexpected error occurred while updating the content. Please contact support for further assistance.");
+            }
         }
 
         var targetContentId = publish
