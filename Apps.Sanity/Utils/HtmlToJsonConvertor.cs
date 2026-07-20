@@ -115,11 +115,19 @@ public static class HtmlToJsonConvertor
             }
 
             var patchContent = (JObject)existingPatch["patch"]!;
+            var arrayName = GetArrayName(parsedPathSegments);
+            var usesLanguageField = InferUsesLanguageField(contentObj, arrayName);
+
+            // Self-heal: remove stale duplicate keys shaped like "<lang>_deduped_N".
+            // Sanity's content lake auto-renames a duplicate array _key to this form when a
+            // previous sync inserted an item whose _key collided with an existing one. Such
+            // keys are not valid registered languages and block publishing in Studio with
+            // "Array item keys must be valid languages registered to the field type".
+            AddDedupedKeyCleanup(patchContent, contentObj, arrayName, targetLanguage, usesLanguageField);
+
             if (shouldInsertAfter)
             {
-                var arrayName = GetArrayName(parsedPathSegments);
                 var itemType = InferInternationalizedType(contentObj, arrayName);
-                var usesLanguageField = InferUsesLanguageField(contentObj, arrayName);
 
                 if (patchContent["insert"] == null)
                 {
@@ -331,6 +339,51 @@ public static class HtmlToJsonConvertor
         }
 
         return segments[0];
+    }
+
+    private static void AddDedupedKeyCleanup(JObject patchContent, JObject contentObj, string arrayName,
+        string targetLanguage, bool usesLanguageField)
+    {
+        // Deduped-key corruption only happens with the "_key == language" convention.
+        // When a random _key + language field is used, duplicates don't collide on language.
+        if (usesLanguageField || string.IsNullOrEmpty(arrayName) || string.IsNullOrEmpty(targetLanguage))
+        {
+            return;
+        }
+
+        if (ResolveTokenAtPath(contentObj, arrayName) is not JArray array)
+        {
+            return;
+        }
+
+        var dedupedPrefix = $"{targetLanguage}_deduped";
+        var staleKeys = array
+            .OfType<JObject>()
+            .Select(item => item["_key"]?.ToString())
+            .Where(key => !string.IsNullOrEmpty(key)
+                && key!.StartsWith(dedupedPrefix, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (staleKeys.Count == 0)
+        {
+            return;
+        }
+
+        if (patchContent["unset"] is not JArray unsetArray)
+        {
+            unsetArray = new JArray();
+            patchContent["unset"] = unsetArray;
+        }
+
+        foreach (var key in staleKeys)
+        {
+            var selector = $"{arrayName}[_key==\"{key}\"]";
+            if (unsetArray.All(existing => existing.ToString() != selector))
+            {
+                unsetArray.Add(selector);
+            }
+        }
     }
 
     private static string InferInternationalizedType(JObject current, string arrayPath)
