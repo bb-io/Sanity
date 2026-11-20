@@ -89,8 +89,8 @@ public class ReleaseService
         var request = CreateQueryRequest(datasetId, "*[sanity::partOfRelease($releaseName)]{_id,_type,_createdAt,_updatedAt}")
             .AddQueryParameter("$releaseName", JsonConvert.SerializeObject(release.Name));
 
-        var response = await _client.ExecuteWithErrorHandling<BaseSearchDto<ContentResponse>>(request);
-        return response.Result;
+        var response = await _client.ExecuteWithErrorHandling<BaseSearchDto<ContentDto>>(request);
+        return response.Result.Select(document => document.ToResponse()).ToList();
     }
 
     public async Task CreateReleaseAsync(string datasetId, string releaseName, string? title, string? description, string? releaseType)
@@ -180,7 +180,7 @@ public class ReleaseService
 
         var query = string.Join(" || ", documentIds.Select(id => $"_id == {JsonConvert.SerializeObject(id)}"));
         var request = CreateQueryRequest(datasetId, $"*[{query}]{{_id}}");
-        var response = await _client.ExecuteWithErrorHandling<BaseSearchDto<ContentResponse>>(request);
+        var response = await _client.ExecuteWithErrorHandling<BaseSearchDto<ContentDto>>(request);
 
         return response.Result
             .Select(x => x.ContentId)
@@ -241,8 +241,8 @@ public class ReleaseService
 
         var query = string.Join(" || ", documentIds.Select(id => $"_id == {JsonConvert.SerializeObject(id)}"));
         var request = CreateQueryRequest(datasetId, $"*[{query}]{{_id,_type,_createdAt,_updatedAt}}");
-        var response = await _client.ExecuteWithErrorHandling<BaseSearchDto<ContentResponse>>(request);
-        return response.Result;
+        var response = await _client.ExecuteWithErrorHandling<BaseSearchDto<ContentDto>>(request);
+        return response.Result.Select(document => document.ToResponse()).ToList();
     }
 
     private async Task DispatchActionsAsync(string datasetId, JObject action)
