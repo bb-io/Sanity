@@ -204,7 +204,7 @@ public static class JsonToHtmlConverter
         string sourceLanguage, AssetService assetService, string datasetId,
         Dictionary<string, JObject>? referencedEntries = null, List<FieldSizeRestriction>? fieldRestrictions = null)
     {
-        if (IsInternationalizedValue(obj))
+        if (JsonHelper.IsInternationalizedValue(obj))
         {
             // Support both old format (_key == language code) and new format (language field + random _key)
             var lang = obj["language"]?.ToString() ?? obj["_key"]?.ToString();
@@ -329,20 +329,9 @@ public static class JsonToHtmlConverter
         return hasChildren ? wrapperArr : null;
     }
 
-    private static bool IsInternationalizedValue(JObject obj)
-    {
-        if (obj.TryGetValue("_type", out var typeToken))
-        {
-            string typeStr = typeToken.ToString();
-            return typeStr.Contains("internationalizedArray", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
-    }
-
     private static bool IsInternationalizedArray(JArray arr)
     {
-        return arr.Count > 0 && arr.All(i => i is JObject jo && IsInternationalizedValue(jo));
+        return arr.Count > 0 && arr.All(i => i is JObject jo && JsonHelper.IsInternationalizedValue(jo));
     }
 
     private static string EscapeHtml(string text)

@@ -1,12 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <Product>Sanity</Product>
         <Description>Sanity is a modern headless CMS (Content Management System). Sanity uses structured content to endlessly re-use content across any channel and a composable approach to help businesses connect to any third-party technology, data source, and front end framework.</Description>
-        <Version>1.1.31</Version>
+        <Version>1.1.32</Version>
         <PackageId>Apps.Sanity</PackageId>
         <AssemblyName>Apps.Sanity</AssemblyName>
     </PropertyGroup>
