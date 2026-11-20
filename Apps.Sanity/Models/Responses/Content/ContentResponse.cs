@@ -23,4 +23,7 @@ public class ContentResponse : IDownloadContentInput
 
     [Display("Custom header value")]
     public string CustomHeaderValue { get; set; } = string.Empty;
+
+    [Display("Content title"), JsonIgnore]
+    public string? ContentTitle { get; set; }
 }

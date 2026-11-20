@@ -54,19 +54,4 @@ public class ReferenceFieldDataHandler(InvocationContext invocationContext, [Act
         return referenceFields
             .Select(fieldName => new DataSourceItem(fieldName, fieldName));
     }
-
-    private string GetContentReadableName(JObject jObject)
-    {
-        if (jObject.TryGetValue("name", StringComparison.InvariantCultureIgnoreCase, out var name) && name.Type == JTokenType.String)
-        {
-            return name.ToString();
-        }
-        
-        if (jObject.TryGetValue("title", StringComparison.InvariantCultureIgnoreCase, out var title) && title.Type == JTokenType.String)
-        {
-            return title.ToString();
-        }
-
-        return $"[{jObject["_type"]}] {jObject["_id"]}";
-    }
 }

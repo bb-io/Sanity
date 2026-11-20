@@ -46,19 +46,15 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
     [Action("Get content",
         Description = "Retrieve a content object from a specific dataset using a content identifier.")]
-    public async Task<ContentResponse> GetContentAsync([ActionParameter] ContentIdentifier identifier)
+    public async Task<ContentResponse> GetContentAsync(
+        [ActionParameter] ContentIdentifier identifier,
+        [ActionParameter] GetContentTitleRequest titleRequest)
     {
-        var result = await _draftHelper.GetContentWithDraftFallbackAsync(
-            identifier.ContentId,
-            identifier.GetDatasetIdOrDefault());
-
-        if (result.Count == 0)
-        {
-            throw new PluginMisconfigurationException(
-                "No content found for the provided ID. Please verify that the ID is correct and try again.");
-        }
-
-        return result.First().ToObject<ContentResponse>()!;
+        var content = await GetContentOrThrowAsync(identifier.ContentId, identifier.GetDatasetIdOrDefault());
+        var response = content.ToObject<ContentResponse>()!;
+        response.ContentTitle = BlackbirdExportMetadataFactory.TryGetContentName(
+            content, titleRequest.Locale, titleRequest.TitleField);
+        return response;
     }
 
     [Action("Search locales", Description = "List the unique locales present in a document's field-level localization arrays.")]
@@ -70,12 +66,14 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
 
     [Action("Download content", Description = "Get localizable content fields as HTML file")]
     [BlueprintActionDefinition(BlueprintAction.DownloadContent)]
-    public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync([ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest)
+    public async Task<GetContentAsHtmlResponse> GetContentAsHtmlAsync(
+        [ActionParameter] GetContentAsHtmlRequest getContentAsHtmlRequest,
+        [ActionParameter] DownloadContentTitleRequest titleRequest)
     {
         if (string.IsNullOrEmpty(getContentAsHtmlRequest.LocalizationStrategy))
             throw new PluginMisconfigurationException("Localization strategy must be specified.");
 
-        var workTask = ExecuteGetContentAsHtmlAsync(getContentAsHtmlRequest);
+        var workTask = ExecuteGetContentAsHtmlAsync(getContentAsHtmlRequest, titleRequest.TitleField);
         if (await Task.WhenAny(workTask, Task.Delay(TimeSpan.FromMinutes(15))) != workTask)
         {
             throw new PluginMisconfigurationException(
@@ -88,15 +86,22 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         return await workTask;
     }
 
-    private async Task<GetContentAsHtmlResponse> ExecuteGetContentAsHtmlAsync(GetContentAsHtmlRequest request)
+    private async Task<GetContentAsHtmlResponse> ExecuteGetContentAsHtmlAsync(GetContentAsHtmlRequest request, string? titleField)
     {
         var content = await GetContentOrThrowAsync(
             request.ContentId,
             request.GetDatasetIdOrDefault());
         var referencedEntries = await GetReferencedEntriesAsync(request, content);
         var fieldRestrictions = GetFieldRestrictions(request.FieldNames, request.FieldMaxLength);
-        var html = await BuildContentHtmlAsync(request, content, referencedEntries, fieldRestrictions);
-        return await UploadHtmlOutputAsync($"{request.ContentId}.html", html);
+        var title = BlackbirdExportMetadataFactory.TryGetContentName(content, request.SourceLanguage, titleField);
+        var metadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, request.SourceLanguage);
+        if (!string.IsNullOrWhiteSpace(titleField))
+        {
+            metadata = metadata with { ContentName = title };
+        }
+
+        var html = await BuildContentHtmlAsync(request, content, referencedEntries, fieldRestrictions, metadata);
+        return await UploadHtmlOutputAsync($"{request.ContentId}.html", html, title);
     }
 
     [Action("Upload content", Description = "Update localizable content fields from HTML file")]
@@ -894,7 +899,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         Description = "Remove a content object from a specific dataset using a content identifier.")]
     public async Task DeleteContentAsync([ActionParameter] ContentIdentifier identifier)
     {
-        await GetContentAsync(identifier);
+        await GetContentOrThrowAsync(identifier.ContentId, identifier.GetDatasetIdOrDefault());
 
         var request = new ApiRequest($"/data/mutate/{identifier}", Method.Post, Creds)
             .WithJsonBody(new
@@ -1230,28 +1235,26 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
     }
 
     private async Task<string> BuildContentHtmlAsync(GetContentAsHtmlRequest request, JObject content,
-        Dictionary<string, JObject> referencedEntries, List<FieldSizeRestriction>? fieldRestrictions)
+        Dictionary<string, JObject> referencedEntries, List<FieldSizeRestriction>? fieldRestrictions,
+        BlackbirdExportMetadata metadata)
     {
         LocalizationStrategy strategy = request.LocalizationStrategy.ParseLocalizationStrategy();
         
         var converter = ConverterFactory.CreateJsonToHtmlConverter(strategy);
-        var sourceLanguage = content["language"]?.ToString() ?? request.SourceLanguage;
-        var exportMetadata = BlackbirdExportMetadataFactory.Create(content, request.ContentId, sourceLanguage);
-
         return await converter.ToHtmlAsync(
             content,
             request.ContentId,
-            sourceLanguage,
+            metadata.HtmlLanguage,
             new AssetService(InvocationContext, request.DisableAssetLoading == true),
             request.ToString(),
             referencedEntries,
             request.OrderOfFields,
             fieldRestrictions,
             request.ExcludedFields,
-            exportMetadata);
+            metadata);
     }
 
-    private async Task<GetContentAsHtmlResponse> UploadHtmlOutputAsync(string fileName, string html)
+    private async Task<GetContentAsHtmlResponse> UploadHtmlOutputAsync(string fileName, string html, string? title)
     {
         using var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
         memoryStream.Position = 0;
@@ -1259,7 +1262,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         var fileReference = await fileManagementClient.UploadAsync(memoryStream, "text/html", fileName);
         return new GetContentAsHtmlResponse
         {
-            Content = fileReference
+            Content = fileReference,
+            ContentTitle = title
         };
     }
 
