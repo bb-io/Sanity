@@ -10,4 +10,7 @@ public class GetContentAsHtmlResponse : IDownloadContentOutput
 
     [Display("Content title")]
     public string? ContentTitle { get; set; }
+
+    [Display("Content type")]
+    public string Type { get; set; } = string.Empty;
 }

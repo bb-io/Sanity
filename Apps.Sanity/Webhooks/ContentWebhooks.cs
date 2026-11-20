@@ -1,4 +1,5 @@
 ﻿using Apps.Sanity.Invocables;
+using Apps.Sanity.Models.Dtos;
 using Apps.Sanity.Models.Responses.Content;
 using Apps.Sanity.Utils;
 using Apps.Sanity.Webhooks.Handlers.Content;
@@ -50,8 +51,9 @@ public class ContentWebhooks(InvocationContext invocationContext) : AppInvocable
         }
 
         var body = request.Body.ToString()!;
-        var content = JsonConvert.DeserializeObject<ContentResponse>(body)
-                      ?? throw new Exception($"Cannot deserialize body to a content object. Body: {body}");
+        var document = JsonConvert.DeserializeObject<ContentDto>(body)
+                       ?? throw new Exception($"Cannot deserialize body to a content object. Body: {body}");
+        var content = document.ToResponse();
 
         if (filterRequest.CustomHeaderName != null &&
             request.Headers?.TryGetValue(filterRequest.CustomHeaderName, out var receivedHeaderValue) == true)

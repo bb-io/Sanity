@@ -39,9 +39,11 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             "Search for content within a specific dataset. If no dataset is specified, the production dataset is used by default.")]
     public async Task<SearchContentResponse> SearchContentAsync([ActionParameter] SearchContentRequest request)
     {
-        var result = await SearchContentInternalAsync<ContentResponse>(request);
-        result = result.Where(x => !x.Type.Contains("system")).ToList();
-        return new(result);
+        var result = await SearchContentInternalAsync<ContentDto>(request);
+        var items = result.Where(x => !x.Type.Contains("system"))
+            .Select(x => x.ToResponse())
+            .ToList();
+        return new(items);
     }
 
     [Action("Get content",
@@ -51,7 +53,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         [ActionParameter] GetContentTitleRequest titleRequest)
     {
         var content = await GetContentOrThrowAsync(identifier.ContentId, identifier.GetDatasetIdOrDefault());
-        var response = content.ToObject<ContentResponse>()!;
+        var response = content.ToObject<ContentDto>()!.ToResponse();
         response.ContentTitle = BlackbirdExportMetadataFactory.TryGetContentName(
             content, titleRequest.Locale, titleRequest.TitleField);
         return response;
@@ -101,7 +103,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         }
 
         var html = await BuildContentHtmlAsync(request, content, referencedEntries, fieldRestrictions, metadata);
-        return await UploadHtmlOutputAsync($"{request.ContentId}.html", html, title);
+        var contentType = content.Value<string>("_type") ?? string.Empty;
+        return await UploadHtmlOutputAsync($"{request.ContentId}.html", html, title, contentType);
     }
 
     [Action("Upload content", Description = "Update localizable content fields from HTML file")]
@@ -1254,7 +1257,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
             metadata);
     }
 
-    private async Task<GetContentAsHtmlResponse> UploadHtmlOutputAsync(string fileName, string html, string? title)
+    private async Task<GetContentAsHtmlResponse> UploadHtmlOutputAsync(string fileName, string html, string? title, string contentType)
     {
         using var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(html));
         memoryStream.Position = 0;
@@ -1263,7 +1266,8 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         return new GetContentAsHtmlResponse
         {
             Content = fileReference,
-            ContentTitle = title
+            ContentTitle = title,
+            Type = contentType
         };
     }
 
