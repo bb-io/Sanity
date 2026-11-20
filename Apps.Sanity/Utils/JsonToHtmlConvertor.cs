@@ -61,8 +61,8 @@ public static class JsonToHtmlConverter
                 continue;
             }
 
-            var convertedNode = ConvertTokenToHtml(doc, propValue, propName, contentId, sourceLanguage, assetService,
-                datasetId, referencedEntries, fieldRestrictions);
+            var convertedNode = ConvertTokenToHtml(doc, propValue, propName, propName, contentId, sourceLanguage,
+                assetService, datasetId, referencedEntries, fieldRestrictions);
             if (convertedNode != null)
             {
                 mainContentDiv.AppendChild(convertedNode);
@@ -103,8 +103,8 @@ public static class JsonToHtmlConverter
                         continue;
                     }
 
-                    var convertedNode = ConvertTokenToHtml(doc, propValue, propName, refId, sourceLanguage, assetService,
-                        datasetId, null, fieldRestrictions);
+                    var convertedNode = ConvertTokenToHtml(doc, propValue, propName, propName, refId, sourceLanguage,
+                        assetService, datasetId, null, fieldRestrictions);
                     if (convertedNode != null)
                     {
                         refDiv.AppendChild(convertedNode);
@@ -165,8 +165,8 @@ public static class JsonToHtmlConverter
         return orderedProperties;
     }
 
-    private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath, string entityId,
-        string sourceLanguage, AssetService assetService, string datasetId,
+    private static HtmlNode? ConvertTokenToHtml(HtmlDocument doc, JToken token, string currentPath,
+        string blackbirdKeyPath, string entityId, string sourceLanguage, AssetService assetService, string datasetId,
         Dictionary<string, JObject>? referencedEntries = null, List<FieldSizeRestriction>? fieldRestrictions = null)
     {
         if (token is JObject obj)
@@ -176,19 +176,19 @@ public static class JsonToHtmlConverter
                 var refId = obj["_ref"]!.ToString();
                 var referenceDiv = doc.CreateElement("div");
                 referenceDiv.SetAttributeValue("data-json-path", currentPath);
-                AddBlackbirdKey(referenceDiv, entityId, currentPath);
+                AddBlackbirdKey(referenceDiv, entityId, blackbirdKeyPath);
                 referenceDiv.SetAttributeValue("data-ref-id", refId);
                 referenceDiv.SetAttributeValue("class", "reference");
                 return referenceDiv;
             }
             
-            return ConvertObjectToHtml(doc, obj, currentPath, entityId, sourceLanguage, assetService, datasetId,
-                referencedEntries, fieldRestrictions);
+            return ConvertObjectToHtml(doc, obj, currentPath, blackbirdKeyPath, entityId, sourceLanguage, assetService,
+                datasetId, referencedEntries, fieldRestrictions);
         }
         else if (token is JArray arr)
         {
-            return ConvertArrayToHtml(doc, arr, currentPath, entityId, sourceLanguage, assetService, datasetId,
-                referencedEntries, fieldRestrictions);
+            return ConvertArrayToHtml(doc, arr, currentPath, blackbirdKeyPath, entityId, sourceLanguage, assetService,
+                datasetId, referencedEntries, fieldRestrictions);
         }
         else if (token is JValue)
         {
@@ -200,8 +200,8 @@ public static class JsonToHtmlConverter
         }
     }
 
-    private static HtmlNode? ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath, string entityId,
-        string sourceLanguage, AssetService assetService, string datasetId,
+    private static HtmlNode? ConvertObjectToHtml(HtmlDocument doc, JObject obj, string currentPath,
+        string blackbirdKeyPath, string entityId, string sourceLanguage, AssetService assetService, string datasetId,
         Dictionary<string, JObject>? referencedEntries = null, List<FieldSizeRestriction>? fieldRestrictions = null)
     {
         if (JsonHelper.IsInternationalizedValue(obj))
@@ -215,12 +215,14 @@ public static class JsonToHtmlConverter
 
             if (obj.TryGetValue("value", out var valueToken))
             {
+                var localizedPath = $"{currentPath}[{lang}]";
+                var localizedKeyPath = $"{blackbirdKeyPath}[LOCALE]";
+
                 if (valueToken.Type == JTokenType.String)
                 {
                     var div = doc.CreateElement("div");
-                    var jsonPath = $"{currentPath}[{lang}].value";
-                    div.SetAttributeValue("data-json-path", jsonPath);
-                    AddBlackbirdKey(div, entityId, jsonPath);
+                    div.SetAttributeValue("data-json-path", $"{localizedPath}.value");
+                    AddBlackbirdKey(div, entityId, $"{localizedKeyPath}.value");
                     ApplySizeRestriction(div, currentPath, fieldRestrictions);
                     div.AppendChild(doc.CreateTextNode(valueToken.ToString()));
                     return div;
@@ -228,27 +230,27 @@ public static class JsonToHtmlConverter
                 else if (valueToken is JObject complexObj)
                 {
                     var div = doc.CreateElement("div");
-                    var jsonPath = $"{currentPath}[{lang}]";
-                    div.SetAttributeValue("data-json-path", jsonPath);
-                    AddBlackbirdKey(div, entityId, jsonPath);
+                    div.SetAttributeValue("data-json-path", localizedPath);
+                    AddBlackbirdKey(div, entityId, localizedKeyPath);
 
                     foreach (var property in complexObj.Properties().Where(x => !x.Name.StartsWith("_")))
                     {
-                        var childPath = $"{currentPath}[{lang}].value.{property.Name}";
+                        var childPath = $"{localizedPath}.value.{property.Name}";
+                        var childKeyPath = $"{localizedKeyPath}.value.{property.Name}";
                         var childValue = property.Value;
 
                         if (childValue.Type == JTokenType.String)
                         {
                             var span = doc.CreateElement("span");
                             span.SetAttributeValue("data-json-path", childPath);
-                            AddBlackbirdKey(span, entityId, childPath);
+                            AddBlackbirdKey(span, entityId, childKeyPath);
                             span.AppendChild(doc.CreateTextNode(childValue.ToString()));
                             div.AppendChild(span);
                         }
                         else
                         {
-                            var childNode = ConvertTokenToHtml(doc, childValue, childPath, entityId, sourceLanguage,
-                                assetService, datasetId, referencedEntries, fieldRestrictions);
+                            var childNode = ConvertTokenToHtml(doc, childValue, childPath, childKeyPath, entityId,
+                                sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
                             if (childNode != null)
                             {
                                 div.AppendChild(childNode);
@@ -259,9 +261,8 @@ public static class JsonToHtmlConverter
                 }
                 else if (valueToken is JArray jArrayValue)
                 {
-                    var richTextNode = RichTextToHtmlConvertor.ConvertToHtml(jArrayValue, doc,
-                        $"{currentPath}[{lang}].value", entityId, assetService, datasetId);
-                    return richTextNode;
+                    return RichTextToHtmlConvertor.ConvertToHtml(jArrayValue, doc, $"{localizedPath}.value",
+                        $"{localizedKeyPath}.value", entityId, assetService, datasetId);
                 }
             }
 
@@ -276,8 +277,9 @@ public static class JsonToHtmlConverter
             if (property.Name.StartsWith("_")) continue; 
 
             string childPath = currentPath == null ? property.Name : $"{currentPath}.{property.Name}";
-            var childNode = ConvertTokenToHtml(doc, property.Value, childPath, entityId, sourceLanguage, assetService,
-                datasetId, referencedEntries, fieldRestrictions);
+            string childKeyPath = $"{blackbirdKeyPath}.{property.Name}";
+            var childNode = ConvertTokenToHtml(doc, property.Value, childPath, childKeyPath, entityId, sourceLanguage,
+                assetService, datasetId, referencedEntries, fieldRestrictions);
             if (childNode != null)
             {
                 hasChildren = true;
@@ -288,8 +290,8 @@ public static class JsonToHtmlConverter
         return hasChildren ? container : null;
     }
 
-    private static HtmlNode? ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath, string entityId,
-        string sourceLanguage, AssetService assetService, string datasetId,
+    private static HtmlNode? ConvertArrayToHtml(HtmlDocument doc, JArray arr, string currentPath,
+        string blackbirdKeyPath, string entityId, string sourceLanguage, AssetService assetService, string datasetId,
         Dictionary<string, JObject>? referencedEntries = null, List<FieldSizeRestriction>? fieldRestrictions = null)
     {
         if (IsInternationalizedArray(arr))
@@ -300,8 +302,8 @@ public static class JsonToHtmlConverter
 
             if (itemForSource != null)
             {
-                var itemNode = ConvertObjectToHtml(doc, itemForSource, currentPath, entityId, sourceLanguage,
-                    assetService, datasetId, referencedEntries, fieldRestrictions);
+                var itemNode = ConvertObjectToHtml(doc, itemForSource, currentPath, blackbirdKeyPath, entityId,
+                    sourceLanguage, assetService, datasetId, referencedEntries, fieldRestrictions);
                 if (itemNode != null)
                 {
                     return itemNode;
@@ -317,8 +319,9 @@ public static class JsonToHtmlConverter
         {
             var item = arr[i];
             string childPath = $"{currentPath}[{i}]";
-            var childNode = ConvertTokenToHtml(doc, item, childPath, entityId, sourceLanguage, assetService, datasetId,
-                referencedEntries, fieldRestrictions);
+            string childKeyPath = $"{blackbirdKeyPath}[{i}]";
+            var childNode = ConvertTokenToHtml(doc, item, childPath, childKeyPath, entityId, sourceLanguage,
+                assetService, datasetId, referencedEntries, fieldRestrictions);
             if (childNode != null)
             {
                 hasChildren = true;

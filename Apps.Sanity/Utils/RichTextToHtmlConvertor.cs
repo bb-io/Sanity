@@ -9,11 +9,17 @@ public static class RichTextToHtmlConvertor
     public static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath, string entityId,
         AssetService assetService, string datasetId,
         HashSet<string>? excludedFields = null,
+        HashSet<string>? strictExcludedFields = null) =>
+        ConvertToHtml(jToken, doc, currentPath, currentPath, entityId, assetService, datasetId, excludedFields,
+            strictExcludedFields);
+
+    internal static HtmlNode ConvertToHtml(JArray jToken, HtmlDocument doc, string currentPath, string blackbirdKeyPath,
+        string entityId, AssetService assetService, string datasetId, HashSet<string>? excludedFields = null,
         HashSet<string>? strictExcludedFields = null)
     {
         var wrapper = doc.CreateElement("div");
         wrapper.SetAttributeValue("data-json-path", currentPath);
-        JsonToHtmlConverter.AddBlackbirdKey(wrapper, entityId, currentPath);
+        JsonToHtmlConverter.AddBlackbirdKey(wrapper, entityId, blackbirdKeyPath);
         wrapper.SetAttributeValue("data-rich-text", "true");
         wrapper.SetAttributeValue("data-original-json", jToken.ToString(Newtonsoft.Json.Formatting.None));
 
