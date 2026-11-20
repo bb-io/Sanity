@@ -34,7 +34,7 @@ Before setting up the integration, ensure that you have access to a Sanity proje
 
 - **Search content**: Search for content within a specific dataset. If no dataset is specified, the production dataset is used by default.
 - **Get content**: Retrieve a content object from a specific dataset using its content identifier.
-- **Get locales**: List unique locale codes present in a document's field-level localization arrays, including nested fields. Optionally supply **Exclude locales** to omit matching codes, for example to exclude known source locale and get a list of target locales.
+- **Search locales**: List unique locale codes present in a document's field-level localization arrays, including nested fields. Optionally supply **Exclude locales** to omit matching codes, for example to exclude known source locale and get a list of target locales.
 - **Download content**: Retrieve localizable content fields as an HTML file. Supports both field-level and document-level localization strategies. Optional parameters include:
   - **Localization strategy**: Choose between field-level (default) or document-level localization
   - **Source language**: Specify the source language code for the content

@@ -61,7 +61,7 @@ public class ContentActions(InvocationContext invocationContext, IFileManagement
         return result.First().ToObject<ContentResponse>()!;
     }
 
-    [Action("Get locales", Description = "List the unique locales present in a document's field-level localization arrays.")]
+    [Action("Search locales", Description = "List the unique locales present in a document's field-level localization arrays.")]
     public async Task<GetLocalesResponse> GetLocalesAsync([ActionParameter] GetLocalesRequest request)
     {
         var content = await GetContentOrThrowAsync(request.ContentId, request.GetDatasetIdOrDefault());
