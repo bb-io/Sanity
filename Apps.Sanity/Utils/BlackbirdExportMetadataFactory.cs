@@ -23,62 +23,87 @@ public static class BlackbirdExportMetadataFactory
         {
             HtmlLanguage = language,
             Ucid = string.IsNullOrWhiteSpace(ucidOverride) ? contentId : ucidOverride,
-            ContentName = TryGetContentName(content, language),
+            ContentName = TryGetContentName(content, language, useDefaultFields: true),
             SystemName = SystemName,
             SystemRef = SystemRef
         };
     }
 
-    private static string? TryGetContentName(JObject content, string language)
+    public static string? TryGetContentName(JObject content, string? locale, string? titleField = null, bool useDefaultFields = false)
     {
-        foreach (var fieldName in new[] { "name", "title" })
+        if (string.IsNullOrWhiteSpace(titleField))
         {
-            if (!content.TryGetValue(fieldName, StringComparison.InvariantCultureIgnoreCase, out var token))
+            if (!useDefaultFields)
             {
-                continue;
+                return null;
             }
 
-            var value = TryExtractStringValue(token, language);
-            if (!string.IsNullOrWhiteSpace(value))
+            titleField = null;
+        }
+
+        string[] fieldNames = titleField is null ? ["name", "title"] : [titleField];
+        var candidates = fieldNames
+            .Select(fieldName => content.Property(fieldName, StringComparison.OrdinalIgnoreCase))
+            .OfType<JProperty>()
+            .Where(IsTitleField);
+
+        foreach (var candidate in candidates)
+        {
+            var value = candidate.Value switch
             {
-                return value;
-            }
+                JArray array when !string.IsNullOrWhiteSpace(locale) => FindLocalizedValue(array, locale),
+                _ => candidate.Value
+            };
+			
+			if (value is not JValue { Type: JTokenType.String, Value: string name })
+				continue;
+
+            if (!string.IsNullOrWhiteSpace(name))
+                return name;
         }
 
         return null;
     }
 
-    private static string? TryExtractStringValue(JToken token, string language)
+    public static IEnumerable<string> GetTitleFields(JObject content) =>
+        content.Properties()
+            .Where(IsTitleField)
+            .Select(property => property.Name);
+
+    private static bool IsTitleField(JProperty property)
     {
-        if (token.Type == JTokenType.String)
+        if (property.Name.StartsWith('_'))
+            return false;
+
+        if (property.Value.Type == JTokenType.String)
+            return true;
+
+        if (property.Value is not JArray array)
+            return false;
+
+        var hasStringValue = false;
+        foreach (var entry in array)
         {
-            return token.ToString();
+            if (entry is not JObject item || !JsonHelper.IsInternationalizedValue(item))
+                return false;
+
+            var valueType = item["value"]?.Type;
+            if (valueType is not (null or JTokenType.Null or JTokenType.String))
+                return false;
+
+            hasStringValue = hasStringValue || valueType == JTokenType.String;
         }
 
-        if (token is JObject obj)
-        {
-            if (obj.TryGetValue("value", out var valueToken) && valueToken.Type == JTokenType.String)
-            {
-                return valueToken.ToString();
-            }
-
-            return null;
-        }
-
-        if (token is not JArray array)
-        {
-            return null;
-        }
-
-        var localizedEntry = array
-            .OfType<JObject>()
-            .FirstOrDefault(x => string.Equals(x["_key"]?.ToString(), language, StringComparison.OrdinalIgnoreCase));
-
-        if (localizedEntry?["value"]?.Type == JTokenType.String)
-        {
-            return localizedEntry["value"]!.ToString();
-        }
-
-        return null;
+        return hasStringValue;
     }
+	
+    private static JToken? FindLocalizedValue(JArray array, string locale) =>
+        array.OfType<JObject>()
+            .FirstOrDefault(entry =>
+            {
+                var language = (entry["language"] as JValue)?.Value as string;
+                var key = (entry["_key"] as JValue)?.Value as string;
+                var entryLocale = string.IsNullOrWhiteSpace(language) ? key : language;
+                return string.Equals(entryLocale, locale, StringComparison.OrdinalIgnoreCase);
+            })?["value"];
 }

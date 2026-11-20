@@ -1,6 +1,7 @@
 ﻿using Apps.Sanity.Actions;
 using Apps.Sanity.Invocables;
 using Apps.Sanity.Models.Identifiers;
+using Apps.Sanity.Utils;
 using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Dynamic;
 using Blackbird.Applications.Sdk.Common.Invocation;
@@ -24,18 +25,7 @@ public class ContentDataHandler(InvocationContext invocationContext, [ActionPara
             .Select(x => new DataSourceItem(x["_id"]!.ToString(), GetContentReadableName(x)));
     }
 
-    private string GetContentReadableName(JObject jObject)
-    {
-        if (jObject.TryGetValue("name", StringComparison.InvariantCultureIgnoreCase, out var name) && name.Type == JTokenType.String)
-        {
-            return name.ToString();
-        }
-        
-        if (jObject.TryGetValue("title", StringComparison.InvariantCultureIgnoreCase, out var title) && title.Type == JTokenType.String)
-        {
-            return title.ToString();
-        }
-
-        return $"[{jObject["_type"]}] {jObject["_id"]}";
-    }
+    private static string GetContentReadableName(JObject document) =>
+        BlackbirdExportMetadataFactory.TryGetContentName(document, document["language"]?.ToString(), useDefaultFields: true) ??
+        $"[{document["_type"]}] {document["_id"]}";
 }

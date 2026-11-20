@@ -97,7 +97,7 @@ public class ContentActionsTests : TestBase
     {
         var contentId = "drafts.896c8360-d864-4435-bf69-7d0e29dae2bf";
         var datasetDataHandler = new ContentActions(InvocationContext, FileManager);
-        var content = await datasetDataHandler.GetContentAsync(new() { ContentId = contentId });
+        var content = await datasetDataHandler.GetContentAsync(new() { ContentId = contentId }, new());
 
         content.ContentId.Should().NotBeNullOrEmpty();
         Console.WriteLine($"{content.ContentId}: {content.Type}");
@@ -116,7 +116,7 @@ public class ContentActionsTests : TestBase
                 IncludeReferenceEntries = true,
                 IncludeRichTextReferenceEntries = true,
                 ReferenceFieldNames = ["snippet-ref"]
-            });
+            }, new());
 
         content.Content.Name.Should().NotBeNullOrEmpty();
         Console.WriteLine(content.Content.Name);
@@ -133,7 +133,7 @@ public class ContentActionsTests : TestBase
             ContentId = contentId,
             LocalizationStrategy = "FieldLevel",
             SourceLanguage = "EN"
-        });
+        }, new());
 
         downloadResult.Content.Should().NotBeNull();
 
