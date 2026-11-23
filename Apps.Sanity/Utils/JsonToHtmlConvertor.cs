@@ -231,7 +231,6 @@ public static class JsonToHtmlConverter
                 {
                     var div = doc.CreateElement("div");
                     div.SetAttributeValue("data-json-path", localizedPath);
-                    AddBlackbirdKey(div, entityId, localizedKeyPath);
 
                     foreach (var property in complexObj.Properties().Where(x => !x.Name.StartsWith("_")))
                     {
@@ -256,6 +255,12 @@ public static class JsonToHtmlConverter
                                 div.AppendChild(childNode);
                             }
                         }
+                    }
+
+                    // A container key would mask the keys of nested Portable Text blocks.
+                    if (!div.Descendants("div").Any(node => node.GetAttributeValue("data-rich-text", false)))
+                    {
+                        AddBlackbirdKey(div, entityId, localizedKeyPath);
                     }
                     return div;
                 }
